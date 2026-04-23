@@ -4,14 +4,25 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	pb "github.com/NoahStransky/agenthub/data-plane/pkg/protocol"
+	"github.com/opencontainers/image-spec/specs-go/v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// DockerClient defines the subset of docker client methods we use.
+type DockerClient interface {
+	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *v1.Platform, containerName string) (container.CreateResponse, error)
+	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
+	ContainerInspect(ctx context.Context, containerID string) (types.ContainerJSON, error)
+}
+
 type InstanceManager struct {
 	pb.UnimplementedInstanceManagerServer
-	docker *client.Client
+	docker DockerClient
 }
 
 func NewInstanceManager(dockerHost string) *InstanceManager {
@@ -23,8 +34,23 @@ func NewInstanceManager(dockerHost string) *InstanceManager {
 }
 
 func (m *InstanceManager) CreateInstance(ctx context.Context, req *pb.CreateInstanceRequest) (*pb.CreateInstanceResponse, error) {
-	// TODO: Phase 1 — 实现 Docker 容器创建
-	return nil, fmt.Errorf("not implemented")
+	containerName := fmt.Sprintf("agenthub-%s", req.TenantId)
+	image := "agenthub/hermes-base:latest"
+
+	resp, err := m.docker.ContainerCreate(ctx,
+		&container.Config{Image: image},
+		&container.HostConfig{},
+		nil, nil, containerName,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := m.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return nil, err
+	}
+
+	return &pb.CreateInstanceResponse{ContainerId: resp.ID}, nil
 }
 
 func (m *InstanceManager) StartInstance(ctx context.Context, req *pb.InstanceIdentity) (*pb.InstanceStatus, error) {
@@ -40,7 +66,26 @@ func (m *InstanceManager) DestroyInstance(ctx context.Context, req *pb.InstanceI
 }
 
 func (m *InstanceManager) GetInstanceStatus(ctx context.Context, req *pb.InstanceIdentity) (*pb.InstanceStatus, error) {
-	return nil, fmt.Errorf("not implemented")
+	inspect, err := m.docker.ContainerInspect(ctx, req.ContainerId)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint := ""
+	if inspect.NetworkSettings != nil {
+		endpoint = fmt.Sprintf("http://%s:8080", inspect.NetworkSettings.DefaultNetworkSettings.IPAddress)
+	}
+
+	status := "unknown"
+	if inspect.State != nil {
+		status = inspect.State.Status
+	}
+
+	return &pb.InstanceStatus{
+		ContainerId: req.ContainerId,
+		Status:      status,
+		Endpoint:    endpoint,
+	}, nil
 }
 
 func (m *InstanceManager) StreamLogs(req *pb.InstanceIdentity, stream pb.InstanceManager_StreamLogsServer) error {
