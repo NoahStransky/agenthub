@@ -16,86 +16,99 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8080:8080"  # Traefik Dashboard
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - letsencrypt:/letsencrypt
     networks:
       - agenthub
 
-  # ── API Server ──
-  api:
+  # ── Control Plane (TypeScript / NestJS) ──
+  control-plane:
     build:
-      context: ../backend
-      dockerfile: ../docker/Dockerfile.api
+      context: ../ts-control-plane
+      dockerfile: ../docker/Dockerfile.control-plane
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`api.agenthub.localhost`)"
-      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      - "traefik.http.routers.cp.rule=PathPrefix(\`/api\`,\`/graphql\`,\`/ws\`)"
+      - "traefik.http.services.cp.loadbalancer.server.port=3000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://agenthub:agenthub@postgres:5432/agenthub
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://agenthub:agenthub@postgres:5432/agenthub_cp
       - REDIS_URL=redis://redis:6379/0
-      - DOCKER_HOST=unix:///var/run/docker.sock
-      - SECRET_KEY=${SECRET_KEY:?required}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - JWT_SECRET=${JWT_SECRET:?required}
+      - CORS_ORIGINS=${CORS_ORIGINS}
     depends_on:
       - postgres
       - redis
     networks:
       - agenthub
 
-  # ── Frontend ──
+  # ── Data Plane (Go / Gin + gRPC) ──
+  data-plane:
+    build:
+      context: ../go-data-plane
+      dockerfile: deployments/Dockerfile
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dp.rule=PathPrefix(\`/dp\`)"
+      - "traefik.http.services.dp.loadbalancer.server.port=8080"
+    environment:
+      - GRPC_ADDR=:50051
+      - HTTP_ADDR=:8080
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - CP_API_URL=http://control-plane:3000
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - control-plane
+    networks:
+      - agenthub
+
+  # ── Frontend (React / Vite) ──
   web:
     build:
       context: ../frontend
       dockerfile: ../docker/Dockerfile.web
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.web.rule=Host(`app.agenthub.localhost`)"
+      - "traefik.http.routers.web.rule=Host(\`app.agenthub.localhost\`)"
       - "traefik.http.services.web.loadbalancer.server.port=80"
     networks:
       - agenthub
 
-  # ── PostgreSQL ──
+  # ── PostgreSQL (Shared, logical isolation via DB name) ──
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: agenthub
       POSTGRES_PASSWORD: agenthub
-      POSTGRES_DB: agenthub
+      POSTGRES_DB: agenthub_cp
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     networks:
       - agenthub
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenthub -d agenthub_cp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # ── Redis ──
+  # ── Redis (Shared, DB index isolation) ──
   redis:
     image: redis:7-alpine
-    volumes:
-      - redis_data:/data
     networks:
       - agenthub
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
-  # ── Celery Worker ──
-  worker:
-    build:
-      context: ../backend
-      dockerfile: ../docker/Dockerfile.api
-    command: celery -A workers.celery_app worker --loglevel=info
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://agenthub:agenthub@postgres:5432/agenthub
-      - REDIS_URL=redis://redis:6379/0
-      - DOCKER_HOST=unix:///var/run/docker.sock
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on:
-      - redis
-      - postgres
-    networks:
-      - agenthub
-
-  # ── Prometheus (监控) ──
+  # ── Monitoring ──
   prometheus:
     image: prom/prometheus
     volumes:
@@ -103,7 +116,6 @@ services:
     networks:
       - agenthub
 
-  # ── Grafana (可视化) ──
   grafana:
     image: grafana/grafana
     environment:

@@ -1,0 +1,84 @@
+syntax = "proto3";
+package agenthub.dataplane.v1;
+option go_package = "github.com/NoahStransky/agenthub/data-plane/pkg/protocol";
+
+import "google/protobuf/empty.proto";
+
+service InstanceManager {
+  rpc CreateInstance(CreateInstanceRequest) returns (CreateInstanceResponse);
+  rpc StartInstance(InstanceIdentity) returns (InstanceStatus);
+  rpc StopInstance(InstanceIdentity) returns (InstanceStatus);
+  rpc DestroyInstance(InstanceIdentity) returns (google.protobuf.Empty);
+  rpc GetInstanceStatus(InstanceIdentity) returns (InstanceStatus);
+  rpc StreamLogs(InstanceIdentity) returns (stream LogChunk);
+  rpc SubscribeEvents(google.protobuf.Empty) returns (stream ContainerEvent);
+}
+
+service ModelProxy {
+  rpc ProxyModelRequest(ModelRequest) returns (ModelResponse);
+}
+
+message CreateInstanceRequest {
+  string tenant_id = 1;
+  string tier = 2;
+  map<string, string> labels = 3;
+  ResourceSpec resources = 4;
+}
+
+message ResourceSpec {
+  uint32 cpu_millicores = 1;
+  uint64 memory_bytes = 2;
+  uint32 gpu_count = 3;
+}
+
+message CreateInstanceResponse {
+  string container_id = 1;
+  string endpoint = 2;
+}
+
+message InstanceIdentity {
+  string container_id = 1;
+}
+
+message InstanceStatus {
+  string container_id = 1;
+  string status = 2;
+  string endpoint = 3;
+  uint32 cpu_millicores_used = 4;
+  uint64 memory_bytes_used = 5;
+  string health = 6;
+  int64 started_at = 7;
+}
+
+message LogChunk {
+  string container_id = 1;
+  int64 timestamp = 2;
+  string source = 3;
+  bytes payload = 4;
+}
+
+message ContainerEvent {
+  string container_id = 1;
+  string event_type = 2;
+  map<string, string> metadata = 3;
+}
+
+message ModelRequest {
+  string tenant_id = 1;
+  string container_id = 2;
+  string model_alias = 3;
+  bytes body = 4;
+  bool stream = 5;
+}
+
+message ModelResponse {
+  bytes body = 1;
+  Usage usage = 2;
+  string upstream = 3;
+}
+
+message Usage {
+  uint32 prompt_tokens = 1;
+  uint32 completion_tokens = 2;
+  uint32 total_tokens = 3;
+}

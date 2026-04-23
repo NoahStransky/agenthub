@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String?
+  tier      String   @default("free")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  instances Instance[]
+  projects  Project[]
+  tasks     Task[]
+
+  @@map("tenants")
+}
+
+model Instance {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  containerId   String?  @map("container_id")
+  containerName String   @map("container_name")
+  status        String   @default("pending")
+  endpoint      String?
+  metadata      Json?    @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("instances")
+}
+
+model Project {
+  id          String  @id @default(uuid())
+  tenantId    String  @map("tenant_id")
+  name        String
+  description String?
+  config      String? // models.yaml content
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  tasks  Task[]
+
+  @@map("projects")
+}
+
+model Task {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  projectId   String?   @map("project_id")
+  title       String
+  description String?
+  agents      Json      @default("[]")
+  status      String    @default("pending")
+  result      Json?
+  logs        String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id])
+
+  @@map("tasks")
+}
