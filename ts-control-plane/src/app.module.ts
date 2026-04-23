@@ -7,6 +7,7 @@ import { InstanceModule } from './modules/instance/instance.module';
 import { TaskModule } from './modules/task/task.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { EventsModule } from './modules/events/events.module';
+import { ProjectModule } from './modules/project/project.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { EventsModule } from './modules/events/events.module';
     TaskModule,
     BillingModule,
     EventsModule,
+    ProjectModule,
   ],
 })
 export class AppModule {}
