@@ -1,0 +1,121 @@
+version: "3.8"
+
+services:
+  # ── Reverse Proxy ──
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@agenthub.io"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    networks:
+      - agenthub
+
+  # ── API Server ──
+  api:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.agenthub.localhost`)"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://agenthub:agenthub@postgres:5432/agenthub
+      - REDIS_URL=redis://redis:6379/0
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - SECRET_KEY=${SECRET_KEY:?required}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - agenthub
+
+  # ── Frontend ──
+  web:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`app.agenthub.localhost`)"
+      - "traefik.http.services.web.loadbalancer.server.port=80"
+    networks:
+      - agenthub
+
+  # ── PostgreSQL ──
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agenthub
+      POSTGRES_PASSWORD: agenthub
+      POSTGRES_DB: agenthub
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - agenthub
+
+  # ── Redis ──
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - agenthub
+
+  # ── Celery Worker ──
+  worker:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.api
+    command: celery -A workers.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://agenthub:agenthub@postgres:5432/agenthub
+      - REDIS_URL=redis://redis:6379/0
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - agenthub
+
+  # ── Prometheus (监控) ──
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - agenthub
+
+  # ── Grafana (可视化) ──
+  grafana:
+    image: grafana/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - agenthub
+
+volumes:
+  postgres_data:
+  redis_data:
+  letsencrypt:
+
+networks:
+  agenthub:
+    driver: bridge

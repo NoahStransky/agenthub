@@ -1,0 +1,35 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# 系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Agent 框架 (从上下文复制或 pip 安装)
+COPY solo-company-architecture/ /app/solo-company/
+RUN pip install -e /app/solo-company
+
+# 常用 AI SDK
+RUN pip install --no-cache-dir \
+    openai \
+    anthropic \
+    pyyaml \
+    pydantic \
+    requests \
+    httpx
+
+# TODO: 安装 Claude Code / Codex CLI (可选)
+# RUN npm install -g @anthropics/claude-code
+
+# Hermes Agent Server (轻量 HTTP API 封装)
+COPY agent_server.py /app/agent_server.py
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+EXPOSE 8080
+
+CMD ["python", "-m", "uvicorn", "agent_server:app", "--host", "0.0.0.0", "--port", "8080"]
