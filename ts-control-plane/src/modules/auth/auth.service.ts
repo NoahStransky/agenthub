@@ -14,13 +14,10 @@ export class AuthService {
 
   async register(dto: RegisterDto) {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    return this.prisma.tenant.create({
-      data: {
-        email: dto.email,
-        password: hashedPassword,
-        name: dto.name,
-      },
+    const { password, ...result } = await this.prisma.tenant.create({
+      data: { email: dto.email, password: hashedPassword, name: dto.name },
     });
+    return result;
   }
 
   async login(dto: LoginDto) {
