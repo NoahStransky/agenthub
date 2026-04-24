@@ -7,7 +7,8 @@ export class RedisService {
   private client: Redis;
 
   constructor(private config: ConfigService) {
-    this.client = new Redis(config.get('REDIS_URL') || 'redis://localhost:6379/0');
+    const redisUrl = config.get<string>('REDIS_URL') || 'redis://localhost:6379/0';
+    this.client = new Redis(redisUrl);
   }
 
   getClient(): Redis {
