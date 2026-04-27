@@ -12,6 +12,7 @@ model Tenant {
   email     String   @unique
   password  String
   name      String?
+  role      String   @default("user")
   tier      String   @default("free")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -22,6 +23,15 @@ model Tenant {
   tasks     Task[]
 
   @@map("tenants")
+}
+
+model SystemConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_configs")
 }
 
 model Instance {

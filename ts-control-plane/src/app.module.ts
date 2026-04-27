@@ -8,6 +8,8 @@ import { TaskModule } from './modules/task/task.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { EventsModule } from './modules/events/events.module';
 import { ProjectModule } from './modules/project/project.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { ProjectModule } from './modules/project/project.module';
     BillingModule,
     EventsModule,
     ProjectModule,
+    DashboardModule,
+    AdminModule,
   ],
 })
 export class AppModule {}
