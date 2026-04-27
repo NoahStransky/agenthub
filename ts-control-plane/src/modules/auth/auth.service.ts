@@ -1,7 +1,9 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from '@core/database/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { PrismaService } from '../../core/database/prisma.service';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
@@ -10,48 +12,32 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async register(email: string, password: string): Promise<{ access_token: string }> {
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    try {
-      const tenant = await this.prisma.tenant.create({
-        data: { email, password: hashedPassword },
-      });
-
-      const token = this.jwtService.sign({
-        sub: tenant.id,
-        email: tenant.email,
-      });
-
-      return { access_token: token };
-    } catch (error: any) {
-      if (error.code === 'P2002') {
-        throw new ConflictException('Email already exists');
-      }
-      throw error;
-    }
+  async register(dto: RegisterDto) {
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const { password, ...result } = await this.prisma.tenant.create({
+      data: { email: dto.email, password: hashedPassword, name: dto.name },
+    });
+    return result;
   }
 
-  async login(email: string, password: string): Promise<{ access_token: string }> {
+  async login(dto: LoginDto) {
     const tenant = await this.prisma.tenant.findUnique({
-      where: { email },
+      where: { email: dto.email },
     });
 
     if (!tenant) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const isPasswordValid = await bcrypt.compare(password, tenant.password);
+    const isPasswordValid = await bcrypt.compare(dto.password, tenant.password);
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const token = this.jwtService.sign({
-      sub: tenant.id,
-      email: tenant.email,
-    });
-
-    return { access_token: token };
+    const payload = { sub: tenant.id, email: tenant.email };
+    return {
+      access_token: this.jwtService.sign(payload),
+    };
   }
 }
