@@ -41,11 +41,13 @@ model Instance {
 }
 
 model Project {
-  id          String  @id @default(uuid())
-  tenantId    String  @map("tenant_id")
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
   name        String
   description String?
   config      String? // models.yaml content
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
   tasks  Task[]
