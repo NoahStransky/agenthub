@@ -17,6 +17,11 @@ import { AdminService } from './admin.service';
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
+  @Get('stats')
+  async getStats() {
+    return this.adminService.getStats();
+  }
+
   @Get('users')
   async listUsers(
     @Query('page') page: string = '1',
@@ -33,6 +38,11 @@ export class AdminController {
   @Get('users/:id')
   async getUser(@Param('id') id: string) {
     return this.adminService.getUser(id);
+  }
+
+  @Get('users/:id/usage')
+  async getUserUsage(@Param('id') id: string) {
+    return this.adminService.getUserUsage(id);
   }
 
   @Patch('users/:id/status')

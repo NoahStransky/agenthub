@@ -12,6 +12,8 @@ describe('AdminController', () => {
     listUsers: jest.fn(),
     getUser: jest.fn(),
     updateUserStatus: jest.fn(),
+    getStats: jest.fn(),
+    getUserUsage: jest.fn(),
     getConfig: jest.fn(),
     updateConfig: jest.fn(),
   };
@@ -64,6 +66,18 @@ describe('AdminController', () => {
     });
   });
 
+  describe('GET /admin/stats', () => {
+    it('should call getStats', async () => {
+      const stats = { users: { total: 1 } };
+      mockAdminService.getStats.mockResolvedValue(stats);
+
+      const result = await controller.getStats();
+
+      expect(adminService.getStats).toHaveBeenCalled();
+      expect(result).toEqual(stats);
+    });
+  });
+
   describe('GET /admin/users/:id', () => {
     it('should call getUser with id', async () => {
       const user = { id: '1', email: 'a@test.com' };
@@ -73,6 +87,18 @@ describe('AdminController', () => {
 
       expect(adminService.getUser).toHaveBeenCalledWith('1');
       expect(result).toEqual(user);
+    });
+  });
+
+  describe('GET /admin/users/:id/usage', () => {
+    it('should call getUserUsage with id', async () => {
+      const usage = { totalTokens: 10 };
+      mockAdminService.getUserUsage.mockResolvedValue(usage);
+
+      const result = await controller.getUserUsage('1');
+
+      expect(adminService.getUserUsage).toHaveBeenCalledWith('1');
+      expect(result).toEqual(usage);
     });
   });
 

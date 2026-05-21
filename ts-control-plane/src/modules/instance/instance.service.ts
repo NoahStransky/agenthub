@@ -1,34 +1,59 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@core/database/prisma.service';
-import { DATA_PLANE_CLIENT, IDataPlaneClient } from '@core/grpc/data-plane.client';
+import {
+  RUNTIME_PROVIDER,
+  RuntimeClass,
+  RuntimeProvider,
+  RuntimeType,
+} from '@core/runtime/runtime.provider';
+import { CreateInstanceDto } from './dto/create-instance.dto';
 
 @Injectable()
 export class InstanceService {
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(DATA_PLANE_CLIENT) private readonly dataPlane: IDataPlaneClient,
+    @Inject(RUNTIME_PROVIDER) private readonly runtime: RuntimeProvider,
   ) {}
 
-  async create(tenantId: string, tier: string) {
+  async create(tenantId: string, dto: CreateInstanceDto = {}) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { tier: true },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException(`Tenant with id ${tenantId} not found`);
+    }
+
+    const tier = dto.tier ?? tenant.tier;
+    const runtimeType: RuntimeType = dto.runtimeType ?? 'docker';
+    const runtimeClass: RuntimeClass = dto.runtimeClass ?? 'runc';
     const containerName = `agenthub-${tenantId}-${Date.now()}`;
     const instance = await this.prisma.instance.create({
       data: {
         tenantId,
         containerName,
         status: 'pending',
-      },
+        runtimeType,
+        runtimeClass,
+        desiredStatus: 'running',
+        observedStatus: 'pending',
+        health: 'unknown',
+        metadata: {
+          name: dto.name,
+        },
+      } as any,
     });
 
-    const { containerId, endpoint } = await this.dataPlane.createInstance({ tenantId, tier });
-
-    return this.prisma.instance.update({
-      where: { id: instance.id },
-      data: {
-        containerId,
-        endpoint,
-        status: 'running',
-      },
+    await this.runtime.enqueueCreateInstance({
+      instanceId: instance.id,
+      tenantId,
+      tier,
+      runtimeType,
+      runtimeClass,
     });
+
+    return this.syncRuntimeStatus(instance.id);
   }
 
   async list(tenantId: string) {
@@ -37,7 +62,99 @@ export class InstanceService {
     });
   }
 
-  async getStatus(containerId: string) {
-    return this.dataPlane.getInstanceStatus({ containerId });
+  async getStatus(tenantId: string, instanceId: string) {
+    const instance = await this.prisma.instance.findFirst({
+      where: { id: instanceId, tenantId },
+    });
+
+    if (!instance) {
+      throw new NotFoundException(`Instance with id ${instanceId} not found`);
+    }
+
+    return this.runtime.getInstanceStatus({
+      instanceId: instance.id,
+      containerId: instance.containerId ?? undefined,
+      runtimeResourceName: (instance as any).runtimeResourceName ?? undefined,
+    });
+  }
+
+  async start(tenantId: string, instanceId: string) {
+    const instance = await this.findTenantInstance(tenantId, instanceId);
+
+    await this.runtime.enqueueStartInstance({ tenantId, instanceId: instance.id });
+
+    await this.prisma.instance.update({
+      where: { id: instance.id },
+      data: {
+        status: 'pending',
+        desiredStatus: 'running',
+        observedStatus: 'pending',
+        health: 'unknown',
+        failureReason: null,
+      } as any,
+    });
+
+    return this.syncRuntimeStatus(instance.id);
+  }
+
+  async stop(tenantId: string, instanceId: string) {
+    const instance = await this.findTenantInstance(tenantId, instanceId);
+
+    await this.runtime.enqueueStopInstance({ tenantId, instanceId: instance.id });
+
+    await this.prisma.instance.update({
+      where: { id: instance.id },
+      data: {
+        status: 'stopping',
+        desiredStatus: 'stopped',
+        observedStatus: 'pending',
+      } as any,
+    });
+
+    return this.syncRuntimeStatus(instance.id);
+  }
+
+  async remove(tenantId: string, instanceId: string) {
+    const instance = await this.findTenantInstance(tenantId, instanceId);
+
+    await this.runtime.enqueueDeleteInstance({ tenantId, instanceId: instance.id });
+
+    await this.prisma.instance.update({
+      where: { id: instance.id },
+      data: {
+        status: 'deleting',
+        desiredStatus: 'deleted',
+        observedStatus: 'pending',
+      } as any,
+    });
+
+    return this.syncRuntimeStatus(instance.id);
+  }
+
+  private async findTenantInstance(tenantId: string, instanceId: string) {
+    const instance = await this.prisma.instance.findFirst({
+      where: { id: instanceId, tenantId },
+    });
+
+    if (!instance) {
+      throw new NotFoundException(`Instance with id ${instanceId} not found`);
+    }
+
+    return instance;
+  }
+
+  private async syncRuntimeStatus(instanceId: string) {
+    const status = await this.runtime.getInstanceStatus({ instanceId });
+
+    return this.prisma.instance.update({
+      where: { id: instanceId },
+      data: {
+        observedStatus: status.observedStatus,
+        health: status.health,
+        endpoint: status.endpoint,
+        failureReason: status.failureReason,
+        status: status.observedStatus,
+      } as any,
+    });
   }
 }

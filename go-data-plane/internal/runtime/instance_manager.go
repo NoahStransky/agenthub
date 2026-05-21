@@ -26,10 +26,32 @@ func NewInstanceManager(dockerHost string) *InstanceManager {
 func (m *InstanceManager) CreateInstance(ctx context.Context, req *pb.CreateInstanceRequest) (*pb.CreateInstanceResponse, error) {
 	containerName := fmt.Sprintf("agenthub-%s", req.TenantId)
 	image := "agenthub/hermes-base:latest"
+	labels := map[string]string{
+		"agenthub.tenant_id": req.TenantId,
+		"agenthub.tier":      req.Tier,
+	}
+	for key, value := range req.Labels {
+		labels[key] = value
+	}
+
+	resources := container.Resources{}
+	if req.Resources != nil {
+		resources.Memory = int64(req.Resources.MemoryBytes)
+		resources.NanoCPUs = int64(req.Resources.CpuMillicores) * 1000000
+	}
 
 	resp, err := m.docker.ContainerCreate(ctx,
-		&container.Config{Image: image},
-		&container.HostConfig{},
+		&container.Config{
+			Image:  image,
+			Labels: labels,
+			User:   "10001:10001",
+		},
+		&container.HostConfig{
+			Privileged:     false,
+			CapDrop:        []string{"ALL"},
+			ReadonlyRootfs: true,
+			Resources:      resources,
+		},
 		nil, nil, containerName,
 	)
 	if err != nil {
@@ -44,15 +66,24 @@ func (m *InstanceManager) CreateInstance(ctx context.Context, req *pb.CreateInst
 }
 
 func (m *InstanceManager) StartInstance(ctx context.Context, req *pb.InstanceIdentity) (*pb.InstanceStatus, error) {
-	return nil, fmt.Errorf("not implemented")
+	if err := m.docker.ContainerStart(ctx, req.ContainerId, container.StartOptions{}); err != nil {
+		return nil, err
+	}
+	return m.GetInstanceStatus(ctx, req)
 }
 
 func (m *InstanceManager) StopInstance(ctx context.Context, req *pb.InstanceIdentity) (*pb.InstanceStatus, error) {
-	return nil, fmt.Errorf("not implemented")
+	if err := m.docker.ContainerStop(ctx, req.ContainerId, container.StopOptions{}); err != nil {
+		return nil, err
+	}
+	return m.GetInstanceStatus(ctx, req)
 }
 
 func (m *InstanceManager) DestroyInstance(ctx context.Context, req *pb.InstanceIdentity) (*emptypb.Empty, error) {
-	return nil, fmt.Errorf("not implemented")
+	if err := m.docker.ContainerRemove(ctx, req.ContainerId, container.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (m *InstanceManager) GetInstanceStatus(ctx context.Context, req *pb.InstanceIdentity) (*pb.InstanceStatus, error) {

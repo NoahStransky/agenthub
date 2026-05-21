@@ -7,17 +7,17 @@ export class AdminRoleGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const tenantId = request.user?.tenantId;
+    const userId = request.user?.userId;
 
-    if (!tenantId) {
-      throw new ForbiddenException('Access denied: no tenant context');
+    if (!userId) {
+      throw new ForbiddenException('Access denied: no user context');
     }
 
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
     });
 
-    if (!tenant || tenant.role !== 'admin') {
+    if (!user || !['admin', 'super_admin'].includes(user.platformRole)) {
       throw new ForbiddenException('Access denied: admin role required');
     }
 

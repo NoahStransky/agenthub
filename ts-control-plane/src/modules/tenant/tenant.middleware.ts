@@ -20,18 +20,30 @@ export class TenantMiddleware implements NestMiddleware {
     const token = authHeader.substring(7);
 
     try {
-      const payload = this.jwtService.verify<{ sub: string; email: string }>(token);
-      const tenantId = payload.sub;
+      const payload = this.jwtService.verify<{ sub: string; email: string; activeTenantId?: string }>(token);
+      const userId = payload.sub;
+      const tenantId = payload.activeTenantId;
 
-      const tenant = await this.prisma.tenant.findUnique({
-        where: { id: tenantId },
-      });
-
-      if (!tenant || !tenant.isActive) {
-        throw new UnauthorizedException('Tenant not found or inactive');
+      if (!tenantId) {
+        throw new UnauthorizedException('Missing active tenant');
       }
 
+      const membership = await this.prisma.member.findFirst({
+        where: {
+          userId,
+          tenantId,
+          tenant: { isActive: true },
+          user: { isActive: true, banned: false },
+        },
+      });
+
+      if (!membership) {
+        throw new UnauthorizedException('Tenant membership not found or inactive');
+      }
+
+      (req as any).userId = userId;
       (req as any).tenantId = tenantId;
+      (req as any).memberRole = membership.role;
       next();
     } catch (error) {
       if (error instanceof UnauthorizedException) {

@@ -40,6 +40,24 @@ func (m *MockDockerClient) ContainerStart(
 	return args.Error(0)
 }
 
+func (m *MockDockerClient) ContainerStop(
+	ctx context.Context,
+	containerID string,
+	options container.StopOptions,
+) error {
+	args := m.Called(ctx, containerID, options)
+	return args.Error(0)
+}
+
+func (m *MockDockerClient) ContainerRemove(
+	ctx context.Context,
+	containerID string,
+	options container.RemoveOptions,
+) error {
+	args := m.Called(ctx, containerID, options)
+	return args.Error(0)
+}
+
 func (m *MockDockerClient) ContainerInspect(
 	ctx context.Context,
 	containerID string,
@@ -56,13 +74,31 @@ func TestCreateInstance(t *testing.T) {
 	req := &pb.CreateInstanceRequest{
 		TenantId: "tenant1",
 		Tier:     "standard",
+		Labels:   map[string]string{"traefik.enable": "true"},
+		Resources: &pb.ResourceSpec{
+			CpuMillicores: 500,
+			MemoryBytes:   536870912,
+		},
 	}
 
 	createResp := container.CreateResponse{ID: "abc123", Warnings: nil}
 	mockClient.On("ContainerCreate",
 		ctx,
-		mock.AnythingOfType("*container.Config"),
-		mock.AnythingOfType("*container.HostConfig"),
+		mock.MatchedBy(func(config *container.Config) bool {
+			return config.Image == "agenthub/hermes-base:latest" &&
+				config.User == "10001:10001" &&
+				config.Labels["agenthub.tenant_id"] == "tenant1" &&
+				config.Labels["agenthub.tier"] == "standard" &&
+				config.Labels["traefik.enable"] == "true"
+		}),
+		mock.MatchedBy(func(hostConfig *container.HostConfig) bool {
+			return !hostConfig.Privileged &&
+				hostConfig.ReadonlyRootfs &&
+				len(hostConfig.CapDrop) == 1 &&
+				hostConfig.CapDrop[0] == "ALL" &&
+				hostConfig.Resources.Memory == 536870912 &&
+				hostConfig.Resources.NanoCPUs == 500000000
+		}),
 		mock.Anything,
 		mock.Anything,
 		"agenthub-tenant1",
@@ -107,5 +143,67 @@ func TestGetInstanceStatus(t *testing.T) {
 	assert.Equal(t, "abc123", status.ContainerId)
 	assert.Equal(t, "running", status.Status)
 	assert.Equal(t, "http://172.17.0.2:8080", status.Endpoint)
+	mockClient.AssertExpectations(t)
+}
+
+func TestStartInstance(t *testing.T) {
+	mockClient := new(MockDockerClient)
+	im := &InstanceManager{docker: mockClient}
+
+	ctx := context.Background()
+	req := &pb.InstanceIdentity{ContainerId: "abc123"}
+
+	mockClient.On("ContainerStart", ctx, "abc123", mock.AnythingOfType("container.StartOptions")).Return(nil)
+	mockClient.On("ContainerInspect", ctx, "abc123").Return(types.ContainerJSON{
+		ContainerJSONBase: &types.ContainerJSONBase{
+			ID:    "abc123",
+			State: &types.ContainerState{Status: "running"},
+		},
+	}, nil)
+
+	status, err := im.StartInstance(ctx, req)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "running", status.Status)
+	mockClient.AssertExpectations(t)
+}
+
+func TestStopInstance(t *testing.T) {
+	mockClient := new(MockDockerClient)
+	im := &InstanceManager{docker: mockClient}
+
+	ctx := context.Background()
+	req := &pb.InstanceIdentity{ContainerId: "abc123"}
+
+	mockClient.On("ContainerStop", ctx, "abc123", mock.AnythingOfType("container.StopOptions")).Return(nil)
+	mockClient.On("ContainerInspect", ctx, "abc123").Return(types.ContainerJSON{
+		ContainerJSONBase: &types.ContainerJSONBase{
+			ID:    "abc123",
+			State: &types.ContainerState{Status: "exited"},
+		},
+	}, nil)
+
+	status, err := im.StopInstance(ctx, req)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "exited", status.Status)
+	mockClient.AssertExpectations(t)
+}
+
+func TestDestroyInstance(t *testing.T) {
+	mockClient := new(MockDockerClient)
+	im := &InstanceManager{docker: mockClient}
+
+	ctx := context.Background()
+	req := &pb.InstanceIdentity{ContainerId: "abc123"}
+
+	mockClient.On("ContainerRemove", ctx, "abc123", mock.MatchedBy(func(options container.RemoveOptions) bool {
+		return options.Force && options.RemoveVolumes
+	})).Return(nil)
+
+	resp, err := im.DestroyInstance(ctx, req)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
 	mockClient.AssertExpectations(t)
 }

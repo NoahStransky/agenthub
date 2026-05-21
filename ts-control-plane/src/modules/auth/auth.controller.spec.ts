@@ -5,6 +5,8 @@ import { AuthService } from './auth.service';
 const mockAuthService = {
   register: jest.fn(),
   login: jest.fn(),
+  me: jest.fn(),
+  issueApiTokenFromBetterAuthRequest: jest.fn(),
 };
 
 describe('AuthController', () => {
@@ -44,6 +46,29 @@ describe('AuthController', () => {
       const result = await controller.login(dto);
 
       expect(mockAuthService.login).toHaveBeenCalledWith(dto);
+      expect(result).toEqual({ access_token: 'jwt-token' });
+    });
+  });
+
+  describe('me', () => {
+    it('should call authService.me with user and active tenant from auth context', async () => {
+      mockAuthService.me.mockResolvedValue({ user: { id: 'user-1' } });
+
+      const result = await controller.me({ user: { userId: 'user-1', tenantId: 'tenant-1' } } as any);
+
+      expect(mockAuthService.me).toHaveBeenCalledWith('user-1', 'tenant-1');
+      expect(result).toEqual({ user: { id: 'user-1' } });
+    });
+  });
+
+  describe('apiToken', () => {
+    it('should issue an API token from Better Auth request cookies', async () => {
+      const req = { headers: { cookie: 'better-auth.session_token=signed-token' } } as any;
+      mockAuthService.issueApiTokenFromBetterAuthRequest.mockResolvedValue({ access_token: 'jwt-token' });
+
+      const result = await controller.apiToken(req);
+
+      expect(service.issueApiTokenFromBetterAuthRequest).toHaveBeenCalledWith(req);
       expect(result).toEqual({ access_token: 'jwt-token' });
     });
   });

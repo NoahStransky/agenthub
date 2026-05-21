@@ -48,8 +48,7 @@ export class DashboardService {
       return null;
     }
 
-    const { password, ...result } = tenant;
-    return result;
+    return tenant;
   }
 
   async getProvider() {

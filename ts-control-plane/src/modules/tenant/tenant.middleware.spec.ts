@@ -15,8 +15,8 @@ describe('TenantMiddleware', () => {
   };
 
   const mockPrismaService = {
-    tenant: {
-      findUnique: jest.fn(),
+    member: {
+      findFirst: jest.fn(),
     },
   };
 
@@ -38,7 +38,8 @@ describe('TenantMiddleware', () => {
     jest.clearAllMocks();
   });
 
-  it('should attach tenantId to request when token is valid and tenant exists', async () => {
+  it('should attach user and tenant context when token is valid and membership exists', async () => {
+    const userId = 'user-1';
     const tenantId = 'tenant-1';
     const token = 'valid-token';
     const req = {
@@ -46,14 +47,23 @@ describe('TenantMiddleware', () => {
     } as unknown as Request;
     const res = {} as Response;
 
-    mockJwtService.verify.mockReturnValue({ sub: tenantId, email: 'test@example.com' });
-    mockPrismaService.tenant.findUnique.mockResolvedValue({ id: tenantId, isActive: true });
+    mockJwtService.verify.mockReturnValue({ sub: userId, activeTenantId: tenantId, email: 'test@example.com' });
+    mockPrismaService.member.findFirst.mockResolvedValue({ id: 'member-1', userId, tenantId, role: 'owner' });
 
     await middleware.use(req, res, mockNext);
 
     expect(jwtService.verify).toHaveBeenCalledWith(token);
-    expect(prisma.tenant.findUnique).toHaveBeenCalledWith({ where: { id: tenantId } });
+    expect(prisma.member.findFirst).toHaveBeenCalledWith({
+      where: {
+        userId,
+        tenantId,
+        tenant: { isActive: true },
+        user: { isActive: true, banned: false },
+      },
+    });
+    expect((req as any).userId).toBe(userId);
     expect((req as any).tenantId).toBe(tenantId);
+    expect((req as any).memberRole).toBe('owner');
     expect(mockNext).toHaveBeenCalled();
   });
 
@@ -85,23 +95,22 @@ describe('TenantMiddleware', () => {
     expect(mockNext).not.toHaveBeenCalled();
   });
 
-  it('should throw UnauthorizedException when tenant does not exist', async () => {
+  it('should throw UnauthorizedException when active tenant is missing from token', async () => {
     const req = { headers: { authorization: 'Bearer valid-token' } } as Request;
     const res = {} as Response;
 
-    mockJwtService.verify.mockReturnValue({ sub: 'missing-tenant', email: 'test@example.com' });
-    mockPrismaService.tenant.findUnique.mockResolvedValue(null);
+    mockJwtService.verify.mockReturnValue({ sub: 'user-1', email: 'test@example.com' });
 
     await expect(middleware.use(req, res, mockNext)).rejects.toThrow(UnauthorizedException);
     expect(mockNext).not.toHaveBeenCalled();
   });
 
-  it('should throw UnauthorizedException when tenant is inactive', async () => {
+  it('should throw UnauthorizedException when membership does not exist or is inactive', async () => {
     const req = { headers: { authorization: 'Bearer valid-token' } } as Request;
     const res = {} as Response;
 
-    mockJwtService.verify.mockReturnValue({ sub: 'tenant-1', email: 'test@example.com' });
-    mockPrismaService.tenant.findUnique.mockResolvedValue({ id: 'tenant-1', isActive: false });
+    mockJwtService.verify.mockReturnValue({ sub: 'user-1', activeTenantId: 'tenant-1', email: 'test@example.com' });
+    mockPrismaService.member.findFirst.mockResolvedValue(null);
 
     await expect(middleware.use(req, res, mockNext)).rejects.toThrow(UnauthorizedException);
     expect(mockNext).not.toHaveBeenCalled();

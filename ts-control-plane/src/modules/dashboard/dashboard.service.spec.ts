@@ -97,15 +97,14 @@ describe('DashboardService', () => {
   });
 
   describe('getMe', () => {
-    it('should return tenant info without password', async () => {
+    it('should return tenant workspace info', async () => {
       const tenantId = 'tenant-1';
       const tenantData = {
         id: tenantId,
-        email: 'test@example.com',
-        password: 'secret',
-        name: 'Test User',
-        role: 'user',
+        name: 'Test Workspace',
+        slug: 'test-workspace',
         tier: 'pro',
+        status: 'active',
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -118,17 +117,7 @@ describe('DashboardService', () => {
       expect(prisma.tenant.findUnique).toHaveBeenCalledWith({
         where: { id: tenantId },
       });
-      expect(result).toEqual({
-        id: tenantId,
-        email: 'test@example.com',
-        name: 'Test User',
-        role: 'user',
-        tier: 'pro',
-        isActive: true,
-        createdAt: tenantData.createdAt,
-        updatedAt: tenantData.updatedAt,
-      });
-      expect((result as any).password).toBeUndefined();
+      expect(result).toEqual(tenantData);
     });
 
     it('should return null for non-existent tenant', async () => {

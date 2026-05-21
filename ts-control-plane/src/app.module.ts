@@ -10,6 +10,7 @@ import { EventsModule } from './modules/events/events.module';
 import { ProjectModule } from './modules/project/project.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { LlmProviderModule } from './modules/llm-provider/llm-provider.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AdminModule } from './modules/admin/admin.module';
     ProjectModule,
     DashboardModule,
     AdminModule,
+    LlmProviderModule,
   ],
 })
 export class AppModule {}
