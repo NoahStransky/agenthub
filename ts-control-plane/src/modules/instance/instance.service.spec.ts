@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { InstanceService } from './instance.service';
 import { PrismaService } from '@core/database/prisma.service';
 import { RUNTIME_PROVIDER, RuntimeProvider } from '@core/runtime/runtime.provider';
+import { WorkspaceStorageProvider } from '@core/workspace/workspace-storage.provider';
 
 describe('InstanceService', () => {
   let service: InstanceService;
@@ -27,6 +28,9 @@ describe('InstanceService', () => {
     enqueueDeleteInstance: jest.fn(),
     getInstanceStatus: jest.fn(),
   };
+  const mockWorkspaceStorage = {
+    provisionWorkspace: jest.fn(),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -34,6 +38,7 @@ describe('InstanceService', () => {
         InstanceService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RUNTIME_PROVIDER, useValue: mockRuntimeProvider },
+        { provide: WorkspaceStorageProvider, useValue: mockWorkspaceStorage },
       ],
     }).compile();
 
@@ -63,6 +68,26 @@ describe('InstanceService', () => {
       };
 
       mockPrismaService.tenant.findUnique.mockResolvedValue({ tier: 'pro' });
+      mockWorkspaceStorage.provisionWorkspace.mockResolvedValue({
+        metadata: {
+          provider: 'minio',
+          endpoint: 'http://minio:9000',
+          bucket: 'agenthub-workspaces',
+          region: 'us-east-1',
+          prefix: 'tenants/tenant-1/instances/instance-1/workspace/',
+          mountPath: '/workspace',
+        },
+        runtime: {
+          provider: 'minio',
+          endpoint: 'http://minio:9000',
+          bucket: 'agenthub-workspaces',
+          region: 'us-east-1',
+          prefix: 'tenants/tenant-1/instances/instance-1/workspace/',
+          mountPath: '/workspace',
+          accessKey: 'agenthub',
+          secretKey: 'agenthub-secret',
+        },
+      });
       mockPrismaService.instance.create.mockResolvedValue(createdInstance);
       (mockRuntimeProvider.enqueueCreateInstance as jest.Mock).mockResolvedValue(undefined);
       (mockRuntimeProvider.getInstanceStatus as jest.Mock).mockResolvedValue({
@@ -85,6 +110,7 @@ describe('InstanceService', () => {
 
       expect(prisma.instance.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
+          id: expect.any(String),
           tenantId,
           containerName: expect.any(String),
           status: 'pending',
@@ -93,7 +119,17 @@ describe('InstanceService', () => {
           desiredStatus: 'running',
           observedStatus: 'pending',
           health: 'unknown',
+          metadata: expect.objectContaining({
+            workspace: expect.objectContaining({
+              bucket: 'agenthub-workspaces',
+              prefix: 'tenants/tenant-1/instances/instance-1/workspace/',
+            }),
+          }),
         }),
+      });
+      expect(mockWorkspaceStorage.provisionWorkspace).toHaveBeenCalledWith({
+        tenantId,
+        instanceId: expect.any(String),
       });
       expect(runtime.enqueueCreateInstance).toHaveBeenCalledWith({
         instanceId: createdInstance.id,
@@ -101,6 +137,14 @@ describe('InstanceService', () => {
         tier: 'pro',
         runtimeType: 'docker',
         runtimeClass: 'gvisor',
+        containerName: expect.stringMatching(/^agenthub-tenant-1-\d+$/),
+        workspace: expect.objectContaining({
+          provider: 'minio',
+          bucket: 'agenthub-workspaces',
+          prefix: 'tenants/tenant-1/instances/instance-1/workspace/',
+          accessKey: 'agenthub',
+          secretKey: 'agenthub-secret',
+        }),
       });
       expect(prisma.instance.update).toHaveBeenCalledWith({
         where: { id: createdInstance.id },
@@ -128,6 +172,7 @@ describe('InstanceService', () => {
 
       expect(prisma.instance.findMany).toHaveBeenCalledWith({
         where: { tenantId },
+        orderBy: { createdAt: 'desc' },
       });
       expect(result).toEqual(instances);
     });
@@ -170,7 +215,7 @@ describe('InstanceService', () => {
 
       const result = await service.start('tenant-1', 'instance-1');
 
-      expect(runtime.enqueueStartInstance).toHaveBeenCalledWith({ tenantId: 'tenant-1', instanceId: 'instance-1' });
+      expect(runtime.enqueueStartInstance).toHaveBeenCalledWith({ tenantId: 'tenant-1', instanceId: 'instance-1', containerId: undefined });
       expect(prisma.instance.update).toHaveBeenCalledWith({
         where: { id: 'instance-1' },
         data: expect.objectContaining({ desiredStatus: 'running', observedStatus: 'pending' }),
@@ -188,7 +233,7 @@ describe('InstanceService', () => {
 
       await service.stop('tenant-1', 'instance-1');
 
-      expect(runtime.enqueueStopInstance).toHaveBeenCalledWith({ tenantId: 'tenant-1', instanceId: 'instance-1' });
+      expect(runtime.enqueueStopInstance).toHaveBeenCalledWith({ tenantId: 'tenant-1', instanceId: 'instance-1', containerId: undefined });
       expect(prisma.instance.update).toHaveBeenCalledWith({
         where: { id: 'instance-1' },
         data: expect.objectContaining({ desiredStatus: 'stopped', observedStatus: 'pending' }),
@@ -205,7 +250,7 @@ describe('InstanceService', () => {
 
       await service.remove('tenant-1', 'instance-1');
 
-      expect(runtime.enqueueDeleteInstance).toHaveBeenCalledWith({ tenantId: 'tenant-1', instanceId: 'instance-1' });
+      expect(runtime.enqueueDeleteInstance).toHaveBeenCalledWith({ tenantId: 'tenant-1', instanceId: 'instance-1', containerId: undefined });
       expect(prisma.instance.update).toHaveBeenCalledWith({
         where: { id: 'instance-1' },
         data: expect.objectContaining({ desiredStatus: 'deleted', observedStatus: 'pending' }),

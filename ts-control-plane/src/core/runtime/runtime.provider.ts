@@ -7,6 +7,17 @@ export interface RuntimeCreateRequest {
   tier: string;
   runtimeType: RuntimeType;
   runtimeClass: RuntimeClass;
+  containerName: string;
+  workspace?: {
+    provider: 'minio' | 's3';
+    endpoint?: string;
+    bucket: string;
+    region: string;
+    prefix: string;
+    mountPath: string;
+    accessKey?: string;
+    secretKey?: string;
+  };
 }
 
 export interface RuntimeCreateResult {
@@ -23,10 +34,10 @@ export interface RuntimeStatus {
 }
 
 export interface RuntimeProvider {
-  enqueueCreateInstance(req: RuntimeCreateRequest): Promise<void>;
-  enqueueStartInstance(req: { instanceId: string; tenantId: string }): Promise<void>;
-  enqueueStopInstance(req: { instanceId: string; tenantId: string }): Promise<void>;
-  enqueueDeleteInstance(req: { instanceId: string; tenantId: string }): Promise<void>;
+  enqueueCreateInstance(req: RuntimeCreateRequest): Promise<RuntimeCreateResult | void>;
+  enqueueStartInstance(req: { instanceId: string; tenantId: string; containerId?: string }): Promise<RuntimeStatus | void>;
+  enqueueStopInstance(req: { instanceId: string; tenantId: string; containerId?: string }): Promise<RuntimeStatus | void>;
+  enqueueDeleteInstance(req: { instanceId: string; tenantId: string; containerId?: string }): Promise<RuntimeStatus | void>;
   getInstanceStatus(req: { instanceId?: string; runtimeResourceName?: string; containerId?: string }): Promise<RuntimeStatus>;
 }
 

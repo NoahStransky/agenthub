@@ -10,10 +10,25 @@ import (
 // ---- Messages ----
 
 type CreateInstanceRequest struct {
-	TenantId  string
-	Tier      string
-	Labels    map[string]string
-	Resources *ResourceSpec
+	InstanceId    string
+	TenantId      string
+	Tier          string
+	RuntimeClass  string
+	ContainerName string
+	Labels        map[string]string
+	Resources     *ResourceSpec
+	Workspace     *WorkspaceSpec
+}
+
+type WorkspaceSpec struct {
+	Provider  string
+	Endpoint  string
+	Bucket    string
+	Region    string
+	Prefix    string
+	MountPath string
+	AccessKey string
+	SecretKey string
 }
 
 type ResourceSpec struct {
@@ -134,5 +149,5 @@ func (UnimplementedModelProxyServer) ProxyModelRequest(context.Context, *ModelRe
 
 // ---- Registration stubs ----
 
-func RegisterInstanceManagerServer(s interface{}, srv InstanceManagerServer)   {}
-func RegisterModelProxyServer(s interface{}, srv ModelProxyServer)             {}
+func RegisterInstanceManagerServer(s interface{}, srv InstanceManagerServer) {}
+func RegisterModelProxyServer(s interface{}, srv ModelProxyServer)           {}

@@ -16,21 +16,27 @@ interface Instance {
 export default function Instances() {
   const [instances, setInstances] = useState<Instance[]>([])
   const [loading, setLoading] = useState(true)
+  const [mutating, setMutating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function loadInstances() {
-    setLoading(true)
+  async function loadInstances(showLoading = true) {
+    if (showLoading) {
+      setLoading(true)
+    }
     try {
       setInstances(await apiFetch<Instance[]>('/instances'))
       setError(null)
     } catch {
       setError('Could not load instances')
     } finally {
-      setLoading(false)
+      if (showLoading) {
+        setLoading(false)
+      }
     }
   }
 
   async function createInstance() {
+    setMutating(true)
     try {
       await apiFetch('/instances', {
         method: 'POST',
@@ -39,10 +45,13 @@ export default function Instances() {
       await loadInstances()
     } catch {
       setError('Could not create instance')
+    } finally {
+      setMutating(false)
     }
   }
 
   async function lifecycle(id: string, action: 'start' | 'stop' | 'delete') {
+    setMutating(true)
     try {
       await apiFetch(`/instances/${id}${action === 'delete' ? '' : `/${action}`}`, {
         method: action === 'delete' ? 'DELETE' : 'POST',
@@ -50,11 +59,17 @@ export default function Instances() {
       await loadInstances()
     } catch {
       setError(`Could not ${action} instance`)
+    } finally {
+      setMutating(false)
     }
   }
 
   useEffect(() => {
     void loadInstances()
+    const timer = window.setInterval(() => {
+      void loadInstances(false)
+    }, 3000)
+    return () => window.clearInterval(timer)
   }, [])
 
   const columns: ColumnsType<Instance> = [
@@ -68,9 +83,9 @@ export default function Instances() {
       title: 'Actions',
       render: (_, instance) => (
         <Space>
-          <Button size="small" onClick={() => lifecycle(instance.id, 'start')}>Start</Button>
-          <Button size="small" onClick={() => lifecycle(instance.id, 'stop')}>Stop</Button>
-          <Button size="small" danger onClick={() => lifecycle(instance.id, 'delete')}>Delete</Button>
+          <Button size="small" disabled={mutating} onClick={() => lifecycle(instance.id, 'start')}>Start</Button>
+          <Button size="small" disabled={mutating} onClick={() => lifecycle(instance.id, 'stop')}>Stop</Button>
+          <Button size="small" danger disabled={mutating} onClick={() => lifecycle(instance.id, 'delete')}>Delete</Button>
         </Space>
       ),
     },
@@ -80,7 +95,7 @@ export default function Instances() {
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography.Title level={2} style={{ margin: 0 }}>Instances</Typography.Title>
-        <Button type="primary" onClick={createInstance}>Create Instance</Button>
+        <Button type="primary" loading={mutating} onClick={createInstance}>Create Instance</Button>
       </div>
       {error ? <Alert type="error" showIcon title={error} /> : null}
       <Table rowKey="id" columns={columns} dataSource={instances} loading={loading} />

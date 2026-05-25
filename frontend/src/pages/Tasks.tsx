@@ -7,6 +7,7 @@ interface Task {
   id: string
   title: string
   status: string
+  instanceId?: string
   createdAt: string
 }
 
@@ -43,6 +44,7 @@ export default function Tasks() {
 
   const columns: ColumnsType<Task> = [
     { title: 'Title', dataIndex: 'title' },
+    { title: 'Instance', dataIndex: 'instanceId', render: (value) => value ?? 'blocked' },
     { title: 'Status', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
     { title: 'Created', dataIndex: 'createdAt', render: (value) => new Date(value).toLocaleString() },
   ]

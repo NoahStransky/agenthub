@@ -19,10 +19,25 @@ service ModelProxy {
 }
 
 message CreateInstanceRequest {
-  string tenant_id = 1;
-  string tier = 2;
-  map<string, string> labels = 3;
-  ResourceSpec resources = 4;
+  string instance_id = 1;
+  string tenant_id = 2;
+  string tier = 3;
+  string runtime_class = 4;
+  string container_name = 5;
+  map<string, string> labels = 6;
+  ResourceSpec resources = 7;
+  WorkspaceSpec workspace = 8;
+}
+
+message WorkspaceSpec {
+  string provider = 1;
+  string endpoint = 2;
+  string bucket = 3;
+  string region = 4;
+  string prefix = 5;
+  string mount_path = 6;
+  string access_key = 7;
+  string secret_key = 8;
 }
 
 message ResourceSpec {

@@ -9,38 +9,50 @@ export class InMemoryRuntimeProvider implements RuntimeProvider {
   private readonly queuedDeletes: Array<{ instanceId: string; tenantId: string }> = [];
   private readonly statuses = new Map<string, RuntimeStatus>();
 
-  async enqueueCreateInstance(req: RuntimeCreateRequest): Promise<void> {
+  async enqueueCreateInstance(req: RuntimeCreateRequest) {
     this.queuedCreates.push(req);
-    this.statuses.set(req.instanceId, {
+    const status = {
       observedStatus: 'running',
       health: 'healthy',
       endpoint: `http://runtime.local/instances/${req.instanceId}`,
-    });
+    };
+    this.statuses.set(req.instanceId, status);
+    return {
+      containerId: `memory-${req.instanceId}`,
+      runtimeResourceName: req.containerName,
+      endpoint: status.endpoint,
+    };
   }
 
-  async enqueueStartInstance(req: { instanceId: string; tenantId: string }): Promise<void> {
+  async enqueueStartInstance(req: { instanceId: string; tenantId: string }) {
     this.queuedStarts.push(req);
-    this.statuses.set(req.instanceId, {
+    const status = {
       observedStatus: 'running',
       health: 'healthy',
       endpoint: `http://runtime.local/instances/${req.instanceId}`,
-    });
+    };
+    this.statuses.set(req.instanceId, status);
+    return status;
   }
 
-  async enqueueStopInstance(req: { instanceId: string; tenantId: string }): Promise<void> {
+  async enqueueStopInstance(req: { instanceId: string; tenantId: string }) {
     this.queuedStops.push(req);
-    this.statuses.set(req.instanceId, {
+    const status = {
       observedStatus: 'stopped',
       health: 'unknown',
-    });
+    };
+    this.statuses.set(req.instanceId, status);
+    return status;
   }
 
-  async enqueueDeleteInstance(req: { instanceId: string; tenantId: string }): Promise<void> {
+  async enqueueDeleteInstance(req: { instanceId: string; tenantId: string }) {
     this.queuedDeletes.push(req);
-    this.statuses.set(req.instanceId, {
+    const status = {
       observedStatus: 'deleted',
       health: 'unknown',
-    });
+    };
+    this.statuses.set(req.instanceId, status);
+    return status;
   }
 
   async getInstanceStatus(req: { instanceId?: string }): Promise<RuntimeStatus> {

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/docker/docker/api/types"
@@ -68,13 +69,30 @@ func (m *MockDockerClient) ContainerInspect(
 
 func TestCreateInstance(t *testing.T) {
 	mockClient := new(MockDockerClient)
-	im := &InstanceManager{docker: mockClient}
+	im := &InstanceManager{
+		docker:        mockClient,
+		dockerNetwork: "agenthub_local",
+		hermesImage:   "agenthub/hermes-base:latest",
+	}
 
 	ctx := context.Background()
 	req := &pb.CreateInstanceRequest{
-		TenantId: "tenant1",
-		Tier:     "standard",
-		Labels:   map[string]string{"traefik.enable": "true"},
+		InstanceId:    "instance1",
+		TenantId:      "tenant1",
+		Tier:          "standard",
+		RuntimeClass:  "gvisor",
+		ContainerName: "agenthub-tenant1-instance1",
+		Labels:        map[string]string{"traefik.enable": "true"},
+		Workspace: &pb.WorkspaceSpec{
+			Provider:  "minio",
+			Endpoint:  "http://minio:9000",
+			Bucket:    "agenthub-workspaces",
+			Region:    "us-east-1",
+			Prefix:    "tenants/tenant1/instances/instance1/workspace/",
+			MountPath: "/workspace",
+			AccessKey: "agenthub",
+			SecretKey: "agenthub-secret",
+		},
 		Resources: &pb.ResourceSpec{
 			CpuMillicores: 500,
 			MemoryBytes:   536870912,
@@ -88,8 +106,16 @@ func TestCreateInstance(t *testing.T) {
 			return config.Image == "agenthub/hermes-base:latest" &&
 				config.User == "10001:10001" &&
 				config.Labels["agenthub.tenant_id"] == "tenant1" &&
+				config.Labels["agenthub.instance_id"] == "instance1" &&
 				config.Labels["agenthub.tier"] == "standard" &&
-				config.Labels["traefik.enable"] == "true"
+				config.Labels["agenthub.runtime_class"] == "gvisor" &&
+				config.Labels["traefik.enable"] == "true" &&
+				containsEnv(config.Env, "AGENTHUB_WORKSPACE_PROVIDER=minio") &&
+				containsEnv(config.Env, "AGENTHUB_WORKSPACE_BUCKET=agenthub-workspaces") &&
+				containsEnv(config.Env, "AGENTHUB_WORKSPACE_PREFIX=tenants/tenant1/instances/instance1/workspace/") &&
+				containsEnv(config.Env, "AGENTHUB_WORKSPACE_MOUNT=/workspace") &&
+				containsEnv(config.Env, "AWS_ACCESS_KEY_ID=agenthub") &&
+				containsEnv(config.Env, "AWS_SECRET_ACCESS_KEY=agenthub-secret")
 		}),
 		mock.MatchedBy(func(hostConfig *container.HostConfig) bool {
 			return !hostConfig.Privileged &&
@@ -97,11 +123,19 @@ func TestCreateInstance(t *testing.T) {
 				len(hostConfig.CapDrop) == 1 &&
 				hostConfig.CapDrop[0] == "ALL" &&
 				hostConfig.Resources.Memory == 536870912 &&
-				hostConfig.Resources.NanoCPUs == 500000000
+				hostConfig.Resources.NanoCPUs == 500000000 &&
+				hostConfig.Tmpfs["/workspace"] == "rw,nosuid,nodev,size=1g" &&
+				hostConfig.Tmpfs["/tmp"] == "rw,nosuid,nodev,size=128m" &&
+				hostConfig.NetworkMode == "agenthub_local"
+		}),
+		mock.MatchedBy(func(networkingConfig *network.NetworkingConfig) bool {
+			endpoint := networkingConfig.EndpointsConfig["agenthub_local"]
+			return endpoint != nil &&
+				len(endpoint.Aliases) == 1 &&
+				endpoint.Aliases[0] == "agenthub-tenant1-instance1"
 		}),
 		mock.Anything,
-		mock.Anything,
-		"agenthub-tenant1",
+		"agenthub-tenant1-instance1",
 	).Return(createResp, nil)
 
 	mockClient.On("ContainerStart",
@@ -117,9 +151,46 @@ func TestCreateInstance(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
-func TestGetInstanceStatus(t *testing.T) {
+func containsEnv(env []string, expected string) bool {
+	for _, item := range env {
+		if item == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCreateInstanceCleansUpWhenStartFails(t *testing.T) {
 	mockClient := new(MockDockerClient)
 	im := &InstanceManager{docker: mockClient}
+
+	ctx := context.Background()
+	req := &pb.CreateInstanceRequest{TenantId: "tenant1"}
+	startErr := errors.New("start failed")
+
+	mockClient.On("ContainerCreate",
+		ctx,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		"agenthub-tenant1",
+	).Return(container.CreateResponse{ID: "abc123"}, nil)
+	mockClient.On("ContainerStart", ctx, "abc123", mock.AnythingOfType("container.StartOptions")).Return(startErr)
+	mockClient.On("ContainerRemove", ctx, "abc123", mock.MatchedBy(func(options container.RemoveOptions) bool {
+		return options.Force && options.RemoveVolumes
+	})).Return(nil)
+
+	resp, err := im.CreateInstance(ctx, req)
+
+	assert.Nil(t, resp)
+	assert.ErrorIs(t, err, startErr)
+	mockClient.AssertExpectations(t)
+}
+
+func TestGetInstanceStatus(t *testing.T) {
+	mockClient := new(MockDockerClient)
+	im := &InstanceManager{docker: mockClient, dockerNetwork: "agenthub_local"}
 
 	ctx := context.Background()
 	req := &pb.InstanceIdentity{ContainerId: "abc123"}
@@ -133,6 +204,11 @@ func TestGetInstanceStatus(t *testing.T) {
 			DefaultNetworkSettings: types.DefaultNetworkSettings{
 				IPAddress: "172.17.0.2",
 			},
+			Networks: map[string]*network.EndpointSettings{
+				"agenthub_local": {
+					IPAddress: "172.20.0.8",
+				},
+			},
 		},
 	}
 	mockClient.On("ContainerInspect", ctx, "abc123").Return(inspect, nil)
@@ -142,7 +218,7 @@ func TestGetInstanceStatus(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "abc123", status.ContainerId)
 	assert.Equal(t, "running", status.Status)
-	assert.Equal(t, "http://172.17.0.2:8080", status.Endpoint)
+	assert.Equal(t, "http://172.20.0.8:8080", status.Endpoint)
 	mockClient.AssertExpectations(t)
 }
 

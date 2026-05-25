@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # ── Reverse Proxy ──
   traefik:
@@ -32,16 +30,30 @@ services:
       - "traefik.enable=true"
       - 'traefik.http.routers.cp.rule=PathPrefix(`/api`,`/graphql`,`/ws`)'
       - "traefik.http.services.cp.loadbalancer.server.port=3000"
+    ports:
+      - "3000:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - SEED_DEV_ACCOUNTS=${SEED_DEV_ACCOUNTS:-true}
+      - AGENTHUB_DEV_PASSWORD=${AGENTHUB_DEV_PASSWORD:-AgentHub123!}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}
       - DATABASE_URL=postgresql://agenthub:agenthub@postgres:5432/agenthub_cp
       - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET=${JWT_SECRET:?required}
-      - CORS_ORIGINS=${CORS_ORIGINS}
+      - JWT_SECRET=${JWT_SECRET:-dev-secret}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      - RUNTIME_PROVIDER=docker
+      - DATA_PLANE_HTTP_URL=http://data-plane:8080
+      - WORKSPACE_STORAGE_PROVIDER=minio
+      - WORKSPACE_S3_ENDPOINT=http://minio:9000
+      - WORKSPACE_S3_BUCKET=agenthub-workspaces
+      - WORKSPACE_S3_REGION=us-east-1
+      - WORKSPACE_S3_ACCESS_KEY=${MINIO_ROOT_USER:-agenthub}
+      - WORKSPACE_S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:-agenthub-secret}
     depends_on:
       - postgres
       - redis
+      - minio
     networks:
       - agenthub
 
@@ -58,24 +70,80 @@ services:
       - GRPC_ADDR=:50051
       - HTTP_ADDR=:8080
       - DOCKER_HOST=unix:///var/run/docker.sock
+      - RUNTIME_DOCKER_NETWORK=${RUNTIME_DOCKER_NETWORK:-agenthub_local}
+      - HERMES_IMAGE=${HERMES_IMAGE:-agenthub/hermes-base:latest}
       - CP_API_URL=http://control-plane:3000
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - WORKSPACE_STORAGE_PROVIDER=minio
+      - WORKSPACE_S3_ENDPOINT=http://minio:9000
+      - WORKSPACE_S3_BUCKET=agenthub-workspaces
+      - WORKSPACE_S3_REGION=us-east-1
+      - WORKSPACE_S3_ACCESS_KEY=${MINIO_ROOT_USER:-agenthub}
+      - WORKSPACE_S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:-agenthub-secret}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - control-plane
+      - minio
+    ports:
+      - "8081:8080"
+      - "50051:50051"
+    networks:
+      - agenthub
+
+  # ── Hermes Runtime Image Builder (build-only profile) ──
+  hermes-base:
+    profiles:
+      - build
+    build:
+      context: .
+      dockerfile: Dockerfile.hermes-base
+    image: agenthub/hermes-base:latest
+    command: ["python", "/app/agent_server.py"]
+
+  # ── Local S3-compatible Workspace Storage ──
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agenthub}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agenthub-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - agenthub
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-agenthub} ${MINIO_ROOT_PASSWORD:-agenthub-secret}; do sleep 2; done;
+      mc mb --ignore-existing local/agenthub-workspaces;
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agenthub}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agenthub-secret}
     networks:
       - agenthub
 
   # ── Frontend (React / Vite) ──
   web:
     build:
-      context: ../frontend
-      dockerfile: ../docker/Dockerfile.web
+      context: ..
+      dockerfile: docker/Dockerfile.web
     labels:
       - "traefik.enable=true"
       - 'traefik.http.routers.web.rule=Host(`app.agenthub.localhost`)'
       - "traefik.http.services.web.loadbalancer.server.port=80"
+    ports:
+      - "5173:80"
+    depends_on:
+      - control-plane
     networks:
       - agenthub
 
@@ -90,7 +158,6 @@ services:
       POSTGRES_DB: agenthub_cp
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     networks:
       - agenthub
     healthcheck:
@@ -129,7 +196,9 @@ volumes:
   postgres_data:
   redis_data:
   letsencrypt:
+  minio_data:
 
 networks:
   agenthub:
+    name: agenthub_local
     driver: bridge

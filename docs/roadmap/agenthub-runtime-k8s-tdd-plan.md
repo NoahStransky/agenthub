@@ -32,6 +32,13 @@ The target runtime path is:
   provider routing, secret lookup, usage accounting, auditing, and quota checks.
 - LLM provider resolution order is task/project provider, tenant default
   provider, then AgentHub platform default provider.
+- Hermes instances should not mount arbitrary host paths. Each instance sees a
+  stable `/workspace` contract, while AgentHub controls the backing storage.
+  Local Docker development uses MinIO as the S3-compatible workspace store; K8s
+  production uses S3-compatible object storage such as AWS S3, R2, or MinIO
+  Gateway. Runtime providers may implement this as sync-on-start/sync-on-finish,
+  an object-storage mount layer, or a sidecar, but the container contract stays
+  `/workspace`.
 - Kubernetes beta uses one namespace per tenant by default. Each tenant namespace
   receives ResourceQuota, LimitRange, NetworkPolicy, and restricted PodSecurity.
 - Authentication should move to Better Auth. Use Better Auth Admin plugin for
@@ -97,6 +104,20 @@ Docker MVP:
 - Apply CPU, memory, PID, network, non-root, no-privileged, and capability-drop
   constraints before exposing the MVP to real tenants.
 - Keep Docker operations behind a runtime provider boundary.
+- Local compose uses Docker-outside-of-Docker: the Go data-plane runs in a
+  container and talks to the host Docker daemon through `/var/run/docker.sock`.
+  Hermes instances are sibling containers on the host Docker daemon, not nested
+  Docker-in-Docker children.
+- Data-plane-created Hermes containers must join a configured runtime network
+  such as `agenthub_local` through `RUNTIME_DOCKER_NETWORK`, so local service
+  discovery and endpoint inspection are deterministic.
+- Use MinIO as the local workspace storage backend. The runtime should provision
+  deterministic object prefixes such as
+  `tenants/{tenantId}/instances/{instanceId}/workspace/` and expose them to
+  Hermes through `/workspace`.
+- Do not bind-mount tenant data from arbitrary host directories. Any local
+  filesystem cache must be AgentHub-managed, per-tenant/per-instance isolated,
+  disposable, and backed by MinIO.
 
 Production beta:
 
@@ -105,11 +126,20 @@ Production beta:
   resource requests, limits, and runtime class.
 - Add a reconciler that compares database desired state with actual runtime
   state and updates observed state, health, endpoint, and failure reason.
+- Add a workspace storage abstraction with drivers for local MinIO and
+  S3-compatible object storage. It owns prefix creation, sync/mount lifecycle,
+  retention policy, quota accounting, and cleanup.
 
 Kubernetes runtime:
 
 - Tenant maps to a namespace such as `tenant-{id}`.
 - Hermes instance maps to Deployment, Service, ConfigMap, and Secret.
+- K8s runtime must not mount the host Docker socket. It implements the same
+  RuntimeProvider contract by using Kubernetes API calls and watch events.
+- Workspace backing storage is S3-compatible object storage. Pods should avoid
+  node-local `hostPath`; use either object-store sync sidecars/init containers,
+  a CSI/object-storage mount layer, or application-level SDK access while
+  preserving the `/workspace` contract.
 - NetworkPolicy defaults to deny and only allows DNS, ModelProxy, and required
   gateway/control-plane traffic.
 - ResourceQuota and LimitRange map tenant plans to namespace and container
@@ -146,6 +176,21 @@ Instance and runtime:
 - Start, stop, and delete are idempotent.
 - Reconciler tests cover running, stopped, deleted, failed, and unknown actual
   states.
+
+Workspace storage:
+
+- Creating an instance provisions a workspace prefix scoped by tenant and
+  instance id.
+- Docker MVP uses the MinIO/S3-compatible storage driver and never accepts a
+  user-supplied host path.
+- Runtime create requests include workspace metadata needed to expose
+  `/workspace` inside Hermes.
+- Workspace credentials are short-lived instance credentials or scoped secrets;
+  they are not tenant LLM provider keys.
+- Stopping or deleting an instance follows the retention policy: persist,
+  archive, or delete workspace data.
+- K8s manifests never use `hostPath` for tenant workspace data and configure the
+  selected S3/object-storage mount or sync mechanism.
 
 ModelProxy and LLM provider:
 

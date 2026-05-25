@@ -1,6 +1,6 @@
 # AgentHub — 多租户 AI Agent 管理平台
 
-> **Phase**: MVP (v0.1.0) | **Status**: 混合架构骨架搭建完成
+> **Phase**: MVP (v0.1.0) | **Status**: Docker MVP 闭环加固中
 
 AgentHub 是一个多租户 **Solo Company AI Agent** 托管平台。在一台服务器上部署后，可为每个用户创建隔离的 Docker 化 Hermes 实例。
 
@@ -17,24 +17,27 @@ AgentHub 是一个多租户 **Solo Company AI Agent** 托管平台。在一台�
 ```
 用户 (Web UI / API)
     ↓
-Traefik (反向代理 + 自动路由)
+Traefik / Frontend API Client
     ↓
 Control Plane (NestJS) — 认证 / 租户 / 计费 / 任务编排
-    ↓ gRPC
+    ↓ HTTP RuntimeProvider (MVP) / gRPC (planned)
 Data Plane (Go) — Docker 编排 / 日志采集 / ModelProxy
     ↓
 Docker Host (租户容器)
+    ↓
+Workspace Storage: MinIO locally, S3-compatible object storage on K8s
 ```
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| **前端** | React 19 + Vite + Tailwind CSS + shadcn/ui |
-| **控制平面** | NestJS + Prisma + PostgreSQL + Redis + gRPC 客户端 |
+| **前端** | React 19 + Vite + Ant Design + Better Auth client |
+| **控制平面** | NestJS + Prisma + PostgreSQL + Redis + Better Auth bridge |
 | **数据平面** | Go + Gin + gRPC 服务端 + Docker SDK |
-| **跨平面通信** | gRPC (HTTP/2 + Protobuf) |
+| **跨平面通信** | HTTP RuntimeProvider for Docker MVP; gRPC/Protobuf reserved |
 | **部署** | Docker Compose + Traefik |
+| **Workspace 存储** | Local MinIO for Docker MVP; S3-compatible object storage for K8s |
 | **监控** | Prometheus + Grafana |
 
 ## 项目结构
@@ -75,6 +78,8 @@ agenthub/
 
 ## 快速开始
 
+下面的命令默认从仓库根目录执行。
+
 ### 1. 克隆与配置
 
 ```bash
@@ -84,23 +89,65 @@ cp .env.example .env
 # 编辑 .env，设置 JWT_SECRET 和 OPENROUTER_API_KEY
 ```
 
-### 2. 启动基础设施
+### 2. 一键启动本地 Docker MVP
 
 ```bash
-cd docker
-docker-compose up -d postgres redis traefik
+make dev-up
 ```
 
-### 3. 启动控制平面
+这会构建 `agenthub/hermes-base:latest`，并启动 Postgres、Redis、MinIO、control-plane、data-plane 和 web。
+
+访问：
+
+```text
+http://localhost:5173
+```
+
+本地端口：
+
+| 服务 | 本地端口 |
+|------|----------|
+| Web | 5173 |
+| Control Plane | 3000 |
+| Data Plane HTTP | 8081 |
+| Data Plane gRPC | 50051 |
+| Postgres | 5433 |
+| MinIO API | 9000 |
+| MinIO Console | 9001 |
+
+### 3. 本地 Docker Runtime 机制
+
+本地 Docker MVP 使用 Docker-outside-of-Docker：`data-plane` 自己运行在容器里，但通过挂载宿主机 Docker socket 调用宿主 Docker daemon 创建 Hermes sibling container。
+
+```text
+data-plane container
+  -> /var/run/docker.sock
+  -> host Docker daemon
+  -> agenthub/hermes-base:latest Hermes container
+```
+
+Hermes 容器会加入固定 Docker network `agenthub_local`，这样 data-plane、control-plane、MinIO 和 Hermes 处在同一个本地网络里。这个方案只用于本地/单机 Docker MVP；后续 K8s Runtime 会把 Docker socket 替换成 Kubernetes API，业务层仍然走 RuntimeProvider contract。
+
+## Hermes Workspace 存储策略
+
+Hermes 实例不应该挂载用户提供的宿主机目录。AgentHub 统一给每个实例提供 `/workspace` 抽象：
+
+- 本地 Docker MVP 使用 Compose 里的 MinIO，bucket 为 `agenthub-workspaces`。
+- K8s/生产环境使用 S3-compatible object storage，例如 AWS S3、Cloudflare R2 或托管 MinIO。
+- workspace object prefix 固定按租户和实例隔离，例如 `tenants/{tenantId}/instances/{instanceId}/workspace/`。
+- RuntimeProvider 后续负责把该 prefix 暴露成容器内 `/workspace`，可以用启动/停止同步、sidecar、对象存储挂载层或 SDK。
+- 禁止接受用户传入任意 host path；如果需要本地缓存，也必须是 AgentHub 管理的 per-tenant/per-instance 临时缓存，并以 MinIO/S3 为最终存储。
+
+### 4. 分服务开发启动
 
 ```bash
 cd ts-control-plane
 npm install
 npx prisma migrate dev
-npm run start:dev
+RUNTIME_PROVIDER=docker DATA_PLANE_HTTP_URL=http://127.0.0.1:8080 npm run start:dev
 ```
 
-### 4. 启动数据平面
+### 5. 启动数据平面
 
 ```bash
 cd go-data-plane
@@ -108,7 +155,7 @@ go mod tidy
 go run ./cmd/dp-server
 ```
 
-### 5. 启动前端
+### 6. 启动前端
 
 ```bash
 cd frontend
@@ -116,7 +163,11 @@ npm install
 npm run dev
 ```
 
-访问 http://localhost:5173
+停止本地 Docker MVP：
+
+```bash
+make dev-down
+```
 
 ## Phase 路线图
 

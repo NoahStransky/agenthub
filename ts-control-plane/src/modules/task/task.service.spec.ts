@@ -82,4 +82,45 @@ describe('TaskService', () => {
       title: 'Run analysis',
     })).rejects.toThrow(NotFoundException);
   });
+
+  it('should attach a task to the newest healthy instance when no instance is specified', async () => {
+    mockPrisma.instance.findFirst.mockResolvedValue({
+      id: 'instance-healthy',
+      observedStatus: 'running',
+      health: 'healthy',
+    });
+    mockPrisma.task.create.mockResolvedValue({ id: 'task-1', instanceId: 'instance-healthy', status: 'pending' });
+
+    await service.create('tenant-1', { title: 'Run analysis' });
+
+    expect(mockPrisma.instance.findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        desiredStatus: 'running',
+        observedStatus: 'running',
+        health: 'healthy',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(mockPrisma.task.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        instanceId: 'instance-healthy',
+        status: 'pending',
+      }),
+    });
+  });
+
+  it('should mark a task queued_blocked when no healthy instance exists', async () => {
+    mockPrisma.instance.findFirst.mockResolvedValue(null);
+    mockPrisma.task.create.mockResolvedValue({ id: 'task-1', status: 'queued_blocked' });
+
+    await service.create('tenant-1', { title: 'Run analysis' });
+
+    expect(mockPrisma.task.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        instanceId: undefined,
+        status: 'queued_blocked',
+      }),
+    });
+  });
 });

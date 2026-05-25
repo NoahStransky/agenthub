@@ -8,17 +8,33 @@ export class TaskService {
 
   async create(tenantId: string, dto: CreateTaskDto) {
     let status = 'pending';
+    let instanceId = dto.instanceId;
 
-    if (dto.instanceId) {
+    if (instanceId) {
       const instance = await this.prisma.instance.findFirst({
-        where: { id: dto.instanceId, tenantId },
+        where: { id: instanceId, tenantId },
       });
 
       if (!instance) {
-        throw new NotFoundException(`Instance with id ${dto.instanceId} not found`);
+        throw new NotFoundException(`Instance with id ${instanceId} not found`);
       }
 
       if ((instance as any).observedStatus !== 'running' || (instance as any).health === 'unhealthy') {
+        status = 'queued_blocked';
+      }
+    } else {
+      const healthyInstance = await this.prisma.instance.findFirst({
+        where: {
+          tenantId,
+          desiredStatus: 'running',
+          observedStatus: 'running',
+          health: 'healthy',
+        } as any,
+        orderBy: { createdAt: 'desc' },
+      });
+      if (healthyInstance) {
+        instanceId = healthyInstance.id;
+      } else {
         status = 'queued_blocked';
       }
     }
@@ -26,7 +42,7 @@ export class TaskService {
     return this.prisma.task.create({
       data: {
         tenantId,
-        instanceId: dto.instanceId,
+        instanceId,
         projectId: dto.projectId,
         title: dto.title,
         description: dto.description,
