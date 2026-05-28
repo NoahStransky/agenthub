@@ -18,6 +18,11 @@ export interface RuntimeCreateRequest {
     accessKey?: string;
     secretKey?: string;
   };
+  gateway?: {
+    publicBaseUrl: string;
+    proxyPath: string;
+    webhookBasePath: string;
+  };
 }
 
 export interface RuntimeCreateResult {

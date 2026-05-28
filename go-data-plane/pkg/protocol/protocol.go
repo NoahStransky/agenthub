@@ -18,6 +18,7 @@ type CreateInstanceRequest struct {
 	Labels        map[string]string
 	Resources     *ResourceSpec
 	Workspace     *WorkspaceSpec
+	Gateway       *GatewaySpec
 }
 
 type WorkspaceSpec struct {
@@ -29,6 +30,12 @@ type WorkspaceSpec struct {
 	MountPath string
 	AccessKey string
 	SecretKey string
+}
+
+type GatewaySpec struct {
+	PublicBaseUrl   string
+	ProxyPath       string
+	WebhookBasePath string
 }
 
 type ResourceSpec struct {

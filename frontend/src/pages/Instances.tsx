@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { apiFetch } from '../lib/api'
+import { API_BASE_URL, apiFetch } from '../lib/api'
 
 interface Instance {
   id: string
@@ -10,6 +10,11 @@ interface Instance {
   observedStatus?: string
   health?: string
   runtimeClass?: string
+  metadata?: {
+    gateway?: {
+      webhookBasePath?: string
+    }
+  }
   createdAt: string
 }
 
@@ -64,6 +69,20 @@ export default function Instances() {
     }
   }
 
+  function openHermes(id: string) {
+    window.open(`${API_BASE_URL}/instances/${id}/proxy/`, '_blank', 'noopener,noreferrer')
+  }
+
+  async function copyWebhookBase(instance: Instance) {
+    const path = instance.metadata?.gateway?.webhookBasePath
+    if (!path) {
+      setError('Webhook gateway is not available for this instance')
+      return
+    }
+    await navigator.clipboard.writeText(`${window.location.origin}${path}`)
+    void message.success('Webhook base URL copied')
+  }
+
   useEffect(() => {
     void loadInstances()
     const timer = window.setInterval(() => {
@@ -83,8 +102,17 @@ export default function Instances() {
       title: 'Actions',
       render: (_, instance) => (
         <Space>
+          <Button
+            size="small"
+            type="primary"
+            disabled={instance.observedStatus !== 'running' || mutating}
+            onClick={() => openHermes(instance.id)}
+          >
+            Open Hermes
+          </Button>
           <Button size="small" disabled={mutating} onClick={() => lifecycle(instance.id, 'start')}>Start</Button>
           <Button size="small" disabled={mutating} onClick={() => lifecycle(instance.id, 'stop')}>Stop</Button>
+          <Button size="small" disabled={!instance.metadata?.gateway?.webhookBasePath} onClick={() => copyWebhookBase(instance)}>Copy Webhook URL</Button>
           <Button size="small" danger disabled={mutating} onClick={() => lifecycle(instance.id, 'delete')}>Delete</Button>
         </Space>
       ),

@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '@core/database/prisma.service';
 import {
@@ -33,6 +33,8 @@ export class InstanceService {
     const runtimeClass: RuntimeClass = dto.runtimeClass ?? 'runc';
     const containerName = `agenthub-${tenantId}-${Date.now()}`;
     const instanceId = randomUUID();
+    const gatewayToken = randomUUID();
+    const gateway = this.buildGatewaySpec(instanceId, gatewayToken);
     const workspace = await this.workspaceStorage.provisionWorkspace({ tenantId, instanceId });
     const instance = await this.prisma.instance.create({
       data: {
@@ -48,6 +50,11 @@ export class InstanceService {
         metadata: {
           name: dto.name,
           workspace: workspace.metadata,
+          gateway: {
+            token: gatewayToken,
+            proxyPath: gateway.proxyPath,
+            webhookBasePath: gateway.webhookBasePath,
+          },
         },
       } as any,
     });
@@ -61,6 +68,7 @@ export class InstanceService {
         runtimeClass,
         containerName,
         workspace: workspace.runtime,
+        gateway,
       });
 
       if (runtimeResult) {
@@ -190,6 +198,28 @@ export class InstanceService {
     }
   }
 
+  async getProxyTarget(tenantId: string, instanceId: string) {
+    const instance = await this.findTenantInstance(tenantId, instanceId);
+    return this.resolveReadyEndpoint(instance as any);
+  }
+
+  async getGatewayTarget(gatewayToken: string) {
+    const instance = await this.prisma.instance.findFirst({
+      where: {
+        metadata: {
+          path: ['gateway', 'token'],
+          equals: gatewayToken,
+        },
+      } as any,
+    });
+
+    if (!instance) {
+      throw new NotFoundException('Hermes gateway route not found');
+    }
+
+    return this.resolveReadyEndpoint(instance as any);
+  }
+
   private async findTenantInstance(tenantId: string, instanceId: string) {
     const instance = await this.prisma.instance.findFirst({
       where: { id: instanceId, tenantId },
@@ -200,6 +230,40 @@ export class InstanceService {
     }
 
     return instance;
+  }
+
+  private async resolveReadyEndpoint(instance: { id: string; containerId?: string | null; endpoint?: string | null; observedStatus?: string | null; runtimeResourceName?: string | null }) {
+    let endpoint = instance.endpoint;
+    let observedStatus = instance.observedStatus;
+
+    if (!endpoint || observedStatus !== 'running') {
+      const status = await this.runtime.getInstanceStatus({
+        instanceId: instance.id,
+        containerId: instance.containerId ?? undefined,
+        runtimeResourceName: instance.runtimeResourceName ?? undefined,
+      });
+      const updated = await this.applyRuntimeStatus(instance.id, status) as any;
+      endpoint = updated.endpoint;
+      observedStatus = updated.observedStatus;
+    }
+
+    if (!endpoint || observedStatus !== 'running') {
+      throw new ServiceUnavailableException('Hermes instance is not ready');
+    }
+
+    return {
+      instanceId: instance.id,
+      endpoint: endpoint.replace(/\/$/, ''),
+    };
+  }
+
+  private buildGatewaySpec(instanceId: string, gatewayToken: string) {
+    const publicBaseUrl = (process.env.AGENTHUB_PUBLIC_BASE_URL || 'http://localhost:5173').replace(/\/$/, '');
+    return {
+      publicBaseUrl,
+      proxyPath: `/api/instances/${instanceId}/proxy/`,
+      webhookBasePath: `/api/gateway/hermes/${gatewayToken}/`,
+    };
   }
 
   private async syncRuntimeStatus(instanceId: string) {

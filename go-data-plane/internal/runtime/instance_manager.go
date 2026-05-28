@@ -82,7 +82,7 @@ func (m *InstanceManager) CreateInstance(ctx context.Context, req *pb.CreateInst
 			Image:  image,
 			Labels: labels,
 			User:   "10001:10001",
-			Env:    workspaceEnv(req.Workspace, mountPath),
+			Env:    runtimeEnv(req.Workspace, req.Gateway, mountPath),
 		},
 		hostConfig,
 		networkingConfig, nil, containerName,
@@ -237,4 +237,26 @@ func workspaceEnv(workspace *pb.WorkspaceSpec, mountPath string) []string {
 		env = append(env, "AWS_SECRET_ACCESS_KEY="+workspace.SecretKey)
 	}
 	return env
+}
+
+func gatewayEnv(gateway *pb.GatewaySpec) []string {
+	if gateway == nil {
+		return nil
+	}
+	env := []string{}
+	if gateway.PublicBaseUrl != "" {
+		env = append(env, "AGENTHUB_PUBLIC_BASE_URL="+gateway.PublicBaseUrl)
+	}
+	if gateway.ProxyPath != "" {
+		env = append(env, "AGENTHUB_HERMES_PROXY_URL="+gateway.PublicBaseUrl+gateway.ProxyPath)
+	}
+	if gateway.WebhookBasePath != "" {
+		env = append(env, "AGENTHUB_HERMES_WEBHOOK_BASE_URL="+gateway.PublicBaseUrl+gateway.WebhookBasePath)
+	}
+	return env
+}
+
+func runtimeEnv(workspace *pb.WorkspaceSpec, gateway *pb.GatewaySpec, mountPath string) []string {
+	env := workspaceEnv(workspace, mountPath)
+	return append(env, gatewayEnv(gateway)...)
 }

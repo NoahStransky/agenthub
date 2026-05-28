@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 const TOKEN_KEY = 'agenthub_token'
 
 export function getToken() {
@@ -7,10 +7,12 @@ export function getToken() {
 
 export function setToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token)
+  document.cookie = `${TOKEN_KEY}=${encodeURIComponent(token)}; Path=/; SameSite=Lax`
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0; SameSite=Lax`
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {

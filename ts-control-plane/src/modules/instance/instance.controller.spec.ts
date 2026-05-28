@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { InstanceController } from './instance.controller';
 import { InstanceService } from './instance.service';
+import { HermesProxyService } from './hermes-proxy.service';
 
 describe('InstanceController', () => {
   let controller: InstanceController;
@@ -11,6 +12,11 @@ describe('InstanceController', () => {
     start: jest.fn(),
     stop: jest.fn(),
     remove: jest.fn(),
+    getProxyTarget: jest.fn(),
+  };
+  const mockHermesProxyService = {
+    forward: jest.fn(),
+    targetPathFromMarker: jest.fn(),
   };
 
   const req = {
@@ -20,7 +26,10 @@ describe('InstanceController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [InstanceController],
-      providers: [{ provide: InstanceService, useValue: mockInstanceService }],
+      providers: [
+        { provide: InstanceService, useValue: mockInstanceService },
+        { provide: HermesProxyService, useValue: mockHermesProxyService },
+      ],
     }).compile();
 
     controller = module.get<InstanceController>(InstanceController);

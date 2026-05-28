@@ -1,13 +1,17 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { All, Body, Controller, Delete, Get, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { InstanceService } from './instance.service';
 import { CreateInstanceDto } from './dto/create-instance.dto';
+import { HermesProxyService } from './hermes-proxy.service';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('instances')
 export class InstanceController {
-  constructor(private readonly instanceService: InstanceService) {}
+  constructor(
+    private readonly instanceService: InstanceService,
+    private readonly hermesProxy: HermesProxyService,
+  ) {}
 
   @Post()
   create(@Body() dto: CreateInstanceDto, @Req() req: Request) {
@@ -43,5 +47,18 @@ export class InstanceController {
   remove(@Param('id') id: string, @Req() req: Request) {
     const tenantId = (req as any).user?.tenantId;
     return this.instanceService.remove(tenantId, id);
+  }
+
+  @All(':id/proxy')
+  @All(':id/proxy/*')
+  async proxy(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const tenantId = (req as any).user?.tenantId;
+    const userId = (req as any).user?.userId;
+    const target = await this.instanceService.getProxyTarget(tenantId, id);
+    return this.hermesProxy.forward(req, res, target, {
+      tenantId,
+      userId,
+      targetPath: this.hermesProxy.targetPathFromMarker(req, `/instances/${id}/proxy`),
+    });
   }
 }

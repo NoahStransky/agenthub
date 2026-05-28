@@ -32,6 +32,10 @@ The target runtime path is:
   provider routing, secret lookup, usage accounting, auditing, and quota checks.
 - LLM provider resolution order is task/project provider, tenant default
   provider, then AgentHub platform default provider.
+- Hermes-owned integrations such as Telegram, Slack, GitHub, and custom
+  webhooks remain inside Hermes. AgentHub should not model their business
+  semantics in Phase 1. AgentHub provides lifecycle, isolation, workspace,
+  authenticated proxy access, and later gateway routing.
 - Hermes instances should not mount arbitrary host paths. Each instance sees a
   stable `/workspace` contract, while AgentHub controls the backing storage.
   Local Docker development uses MinIO as the S3-compatible workspace store; K8s
@@ -111,6 +115,10 @@ Docker MVP:
 - Data-plane-created Hermes containers must join a configured runtime network
   such as `agenthub_local` through `RUNTIME_DOCKER_NETWORK`, so local service
   discovery and endpoint inspection are deterministic.
+- Users open Hermes through the AgentHub proxy route
+  `/api/instances/{instanceId}/proxy/`. The route validates the AgentHub tenant
+  session, resolves the instance endpoint, and transparently forwards requests
+  without interpreting Hermes-owned configuration payloads.
 - Use MinIO as the local workspace storage backend. The runtime should provision
   deterministic object prefixes such as
   `tenants/{tenantId}/instances/{instanceId}/workspace/` and expose them to
@@ -136,6 +144,9 @@ Kubernetes runtime:
 - Hermes instance maps to Deployment, Service, ConfigMap, and Secret.
 - K8s runtime must not mount the host Docker socket. It implements the same
   RuntimeProvider contract by using Kubernetes API calls and watch events.
+- The Docker proxy route evolves into K8s Service/Ingress/Gateway routing. The
+  API contract should stay "open this Hermes instance" rather than exposing
+  Docker container addresses to the frontend.
 - Workspace backing storage is S3-compatible object storage. Pods should avoid
   node-local `hostPath`; use either object-store sync sidecars/init containers,
   a CSI/object-storage mount layer, or application-level SDK access while
@@ -174,6 +185,8 @@ Instance and runtime:
   non-privileged mode, network, and security options.
 - Runtime failures result in `observedStatus=failed` and a failure reason.
 - Start, stop, and delete are idempotent.
+- Open Hermes proxy checks tenant ownership and refuses instances that are not
+  running.
 - Reconciler tests cover running, stopped, deleted, failed, and unknown actual
   states.
 

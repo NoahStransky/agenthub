@@ -59,6 +59,11 @@ type createInstanceRequest struct {
 		AccessKey string `json:"accessKey"`
 		SecretKey string `json:"secretKey"`
 	} `json:"workspace"`
+	Gateway struct {
+		PublicBaseUrl   string `json:"publicBaseUrl"`
+		ProxyPath       string `json:"proxyPath"`
+		WebhookBasePath string `json:"webhookBasePath"`
+	} `json:"gateway"`
 }
 
 func registerInstanceRoutes(r *gin.Engine, manager *runtime.InstanceManager) {
@@ -88,6 +93,11 @@ func registerInstanceRoutes(r *gin.Engine, manager *runtime.InstanceManager) {
 				MountPath: req.Workspace.MountPath,
 				AccessKey: req.Workspace.AccessKey,
 				SecretKey: req.Workspace.SecretKey,
+			},
+			Gateway: &pb.GatewaySpec{
+				PublicBaseUrl:   req.Gateway.PublicBaseUrl,
+				ProxyPath:       req.Gateway.ProxyPath,
+				WebhookBasePath: req.Gateway.WebhookBasePath,
 			},
 		})
 		if err != nil {

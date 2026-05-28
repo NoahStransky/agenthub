@@ -93,6 +93,11 @@ func TestCreateInstance(t *testing.T) {
 			AccessKey: "agenthub",
 			SecretKey: "agenthub-secret",
 		},
+		Gateway: &pb.GatewaySpec{
+			PublicBaseUrl:   "http://localhost:5173",
+			ProxyPath:       "/api/instances/instance1/proxy/",
+			WebhookBasePath: "/api/gateway/hermes/gateway-token/",
+		},
 		Resources: &pb.ResourceSpec{
 			CpuMillicores: 500,
 			MemoryBytes:   536870912,
@@ -115,7 +120,9 @@ func TestCreateInstance(t *testing.T) {
 				containsEnv(config.Env, "AGENTHUB_WORKSPACE_PREFIX=tenants/tenant1/instances/instance1/workspace/") &&
 				containsEnv(config.Env, "AGENTHUB_WORKSPACE_MOUNT=/workspace") &&
 				containsEnv(config.Env, "AWS_ACCESS_KEY_ID=agenthub") &&
-				containsEnv(config.Env, "AWS_SECRET_ACCESS_KEY=agenthub-secret")
+				containsEnv(config.Env, "AWS_SECRET_ACCESS_KEY=agenthub-secret") &&
+				containsEnv(config.Env, "AGENTHUB_HERMES_PROXY_URL=http://localhost:5173/api/instances/instance1/proxy/") &&
+				containsEnv(config.Env, "AGENTHUB_HERMES_WEBHOOK_BASE_URL=http://localhost:5173/api/gateway/hermes/gateway-token/")
 		}),
 		mock.MatchedBy(func(hostConfig *container.HostConfig) bool {
 			return !hostConfig.Privileged &&

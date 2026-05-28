@@ -1,4 +1,4 @@
-import { JwtStrategy } from './jwt.strategy';
+import { JwtStrategy, extractJwtFromCookie } from './jwt.strategy';
 
 describe('JwtStrategy', () => {
   it('should expose user identity and active tenant from JWT claims', async () => {
@@ -19,5 +19,13 @@ describe('JwtStrategy', () => {
       platformRole: 'admin',
       memberRole: 'owner',
     });
+  });
+
+  it('should extract JWT from agenthub_token cookie for browser proxy navigation', () => {
+    expect(extractJwtFromCookie({
+      headers: {
+        cookie: 'theme=light; agenthub_token=abc.def.ghi; other=value',
+      },
+    })).toBe('abc.def.ghi');
   });
 });

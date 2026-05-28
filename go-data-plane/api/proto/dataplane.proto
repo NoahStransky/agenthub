@@ -27,6 +27,7 @@ message CreateInstanceRequest {
   map<string, string> labels = 6;
   ResourceSpec resources = 7;
   WorkspaceSpec workspace = 8;
+  GatewaySpec gateway = 9;
 }
 
 message WorkspaceSpec {
@@ -38,6 +39,12 @@ message WorkspaceSpec {
   string mount_path = 6;
   string access_key = 7;
   string secret_key = 8;
+}
+
+message GatewaySpec {
+  string public_base_url = 1;
+  string proxy_path = 2;
+  string webhook_base_path = 3;
 }
 
 message ResourceSpec {

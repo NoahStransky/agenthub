@@ -28,6 +28,7 @@ export class DockerRuntimeProvider implements RuntimeProvider {
         runtimeClass: req.runtimeClass,
         containerName: req.containerName,
         workspace: req.workspace,
+        gateway: req.gateway,
       }),
     });
 

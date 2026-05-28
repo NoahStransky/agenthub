@@ -128,6 +128,25 @@ data-plane container
 
 Hermes 容器会加入固定 Docker network `agenthub_local`，这样 data-plane、control-plane、MinIO 和 Hermes 处在同一个本地网络里。这个方案只用于本地/单机 Docker MVP；后续 K8s Runtime 会把 Docker socket 替换成 Kubernetes API，业务层仍然走 RuntimeProvider contract。
 
+## Hermes 配置边界
+
+AgentHub 不管理 Telegram、Slack、GitHub webhook 等 Hermes 内部业务配置。用户创建 Hermes 实例后，在 Instances 页面点击 `Open Hermes` 进入该实例自己的 UI/API，由 Hermes 自己保存和处理这些配置。
+
+AgentHub 只负责：
+
+- 创建、启动、停止、删除 Hermes 实例；
+- 给实例提供受 AgentHub 登录保护的 proxy 入口：`/api/instances/{instanceId}/proxy/`；
+- 把请求透明转发给对应 Hermes 实例；
+- 注入 workspace、runtime、租户上下文等托管层配置；
+- 后续在 K8s 中把同一能力映射到 Service + Ingress/Gateway。
+
+Hermes 自己负责：
+
+- Telegram bot token、webhook、allowed chat ids；
+- Hermes 自己的插件、agent、workflow 配置；
+- 自己的管理 UI/API；
+- 把内部配置持久化到 `/workspace`。
+
 ## Hermes Workspace 存储策略
 
 Hermes 实例不应该挂载用户提供的宿主机目录。AgentHub 统一给每个实例提供 `/workspace` 抽象：

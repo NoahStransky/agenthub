@@ -124,6 +124,11 @@ describe('InstanceService', () => {
               bucket: 'agenthub-workspaces',
               prefix: 'tenants/tenant-1/instances/instance-1/workspace/',
             }),
+            gateway: expect.objectContaining({
+              token: expect.any(String),
+              proxyPath: expect.stringMatching(/^\/api\/instances\/.+\/proxy\/$/),
+              webhookBasePath: expect.stringMatching(/^\/api\/gateway\/hermes\/.+\/$/),
+            }),
           }),
         }),
       });
@@ -144,6 +149,11 @@ describe('InstanceService', () => {
           prefix: 'tenants/tenant-1/instances/instance-1/workspace/',
           accessKey: 'agenthub',
           secretKey: 'agenthub-secret',
+        }),
+        gateway: expect.objectContaining({
+          publicBaseUrl: 'http://localhost:5173',
+          proxyPath: expect.stringMatching(/^\/api\/instances\/.+\/proxy\/$/),
+          webhookBasePath: expect.stringMatching(/^\/api\/gateway\/hermes\/.+\/$/),
         }),
       });
       expect(prisma.instance.update).toHaveBeenCalledWith({
@@ -254,6 +264,91 @@ describe('InstanceService', () => {
       expect(prisma.instance.update).toHaveBeenCalledWith({
         where: { id: 'instance-1' },
         data: expect.objectContaining({ desiredStatus: 'deleted', observedStatus: 'pending' }),
+      });
+    });
+  });
+
+  describe('getProxyTarget', () => {
+    it('should return a running instance endpoint for tenant proxying', async () => {
+      mockPrismaService.instance.findFirst.mockResolvedValue({
+        id: 'instance-1',
+        tenantId: 'tenant-1',
+        observedStatus: 'running',
+        endpoint: 'http://172.20.0.8:8080/',
+      });
+
+      await expect(service.getProxyTarget('tenant-1', 'instance-1')).resolves.toEqual({
+        instanceId: 'instance-1',
+        endpoint: 'http://172.20.0.8:8080',
+      });
+      expect(runtime.getInstanceStatus).not.toHaveBeenCalled();
+    });
+
+    it('should sync status before proxying when endpoint is missing', async () => {
+      mockPrismaService.instance.findFirst.mockResolvedValue({
+        id: 'instance-1',
+        tenantId: 'tenant-1',
+        containerId: 'container-1',
+        observedStatus: 'pending',
+        endpoint: null,
+      });
+      (mockRuntimeProvider.getInstanceStatus as jest.Mock).mockResolvedValue({
+        observedStatus: 'running',
+        health: 'healthy',
+        endpoint: 'http://172.20.0.8:8080',
+      });
+      mockPrismaService.instance.update.mockResolvedValue({
+        id: 'instance-1',
+        observedStatus: 'running',
+        endpoint: 'http://172.20.0.8:8080',
+      });
+
+      await expect(service.getProxyTarget('tenant-1', 'instance-1')).resolves.toEqual({
+        instanceId: 'instance-1',
+        endpoint: 'http://172.20.0.8:8080',
+      });
+    });
+
+    it('should reject proxying when Hermes is not ready', async () => {
+      mockPrismaService.instance.findFirst.mockResolvedValue({
+        id: 'instance-1',
+        tenantId: 'tenant-1',
+        observedStatus: 'stopped',
+        endpoint: null,
+      });
+      (mockRuntimeProvider.getInstanceStatus as jest.Mock).mockResolvedValue({
+        observedStatus: 'stopped',
+        health: 'unknown',
+      });
+      mockPrismaService.instance.update.mockResolvedValue({
+        id: 'instance-1',
+        observedStatus: 'stopped',
+        endpoint: null,
+      });
+
+      await expect(service.getProxyTarget('tenant-1', 'instance-1')).rejects.toThrow('Hermes instance is not ready');
+    });
+  });
+
+  describe('getGatewayTarget', () => {
+    it('should resolve an opaque gateway token to a running instance endpoint', async () => {
+      mockPrismaService.instance.findFirst.mockResolvedValue({
+        id: 'instance-1',
+        observedStatus: 'running',
+        endpoint: 'http://172.20.0.8:8080/',
+      });
+
+      await expect(service.getGatewayTarget('gateway-token')).resolves.toEqual({
+        instanceId: 'instance-1',
+        endpoint: 'http://172.20.0.8:8080',
+      });
+      expect(prisma.instance.findFirst).toHaveBeenCalledWith({
+        where: {
+          metadata: {
+            path: ['gateway', 'token'],
+            equals: 'gateway-token',
+          },
+        },
       });
     });
   });
