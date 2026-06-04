@@ -29,6 +29,9 @@ const BETTER_AUTH_PATH_PREFIXES = [
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   const authService = app.get(AuthService);
+  const corsOrigins = process.env.CORS_ORIGINS?.split(',') || true;
+
+  app.enableCors({ origin: corsOrigins, credentials: true });
 
   app.use((req, res, next) => {
     if (
@@ -44,8 +47,6 @@ async function bootstrap() {
   app.use(json());
   app.use(urlencoded({ extended: true }));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  const corsOrigins = process.env.CORS_ORIGINS?.split(',') || true;
-  app.enableCors({ origin: corsOrigins, credentials: true });
   await app.listen(process.env.PORT || 3000);
   console.log(`Control Plane running on ${await app.getUrl()}`);
 }

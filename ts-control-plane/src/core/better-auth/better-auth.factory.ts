@@ -29,10 +29,13 @@ export async function createAgentHubBetterAuth(prisma: PrismaService) {
     session: ['list', 'revoke', 'delete'],
   });
 
+  const trustedOrigins = process.env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean);
+
   return betterAuth({
     secret: process.env.BETTER_AUTH_SECRET || process.env.JWT_SECRET || 'change-me',
     baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3000',
     basePath: process.env.BETTER_AUTH_BASE_PATH || '/auth',
+    ...(trustedOrigins?.length ? { trustedOrigins } : {}),
     database: prismaAdapter(prisma, {
       provider: 'postgresql',
     }),
