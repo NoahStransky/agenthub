@@ -61,11 +61,14 @@ func (m *InstanceManager) CreateInstance(ctx context.Context, req *pb.CreateInst
 		resources.Memory = int64(req.Resources.MemoryBytes)
 		resources.NanoCPUs = int64(req.Resources.CpuMillicores) * 1000000
 	}
+	pidsLimit := int64(256)
+	resources.PidsLimit = &pidsLimit
 	mountPath := workspaceMountPath(req.Workspace)
 	hostConfig := &container.HostConfig{
 		Privileged:     false,
 		CapDrop:        []string{"ALL"},
 		ReadonlyRootfs: true,
+		SecurityOpt:    []string{"no-new-privileges:true"},
 		Resources:      resources,
 		Tmpfs: map[string]string{
 			mountPath: "rw,nosuid,nodev,size=1g",

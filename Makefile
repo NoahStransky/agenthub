@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down dev-logs dev-build-hermes
+.PHONY: dev-up dev-down dev-logs dev-build-hermes smoke-docker-mvp
 
 dev-build-hermes:
 	cd docker && docker compose --profile build build hermes-base
@@ -11,3 +11,6 @@ dev-down:
 
 dev-logs:
 	cd docker && docker compose logs -f control-plane data-plane web
+
+smoke-docker-mvp:
+	node scripts/docker-mvp-smoke.mjs

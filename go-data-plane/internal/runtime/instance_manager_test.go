@@ -129,6 +129,10 @@ func TestCreateInstance(t *testing.T) {
 				hostConfig.ReadonlyRootfs &&
 				len(hostConfig.CapDrop) == 1 &&
 				hostConfig.CapDrop[0] == "ALL" &&
+				len(hostConfig.SecurityOpt) == 1 &&
+				hostConfig.SecurityOpt[0] == "no-new-privileges:true" &&
+				hostConfig.Resources.PidsLimit != nil &&
+				*hostConfig.Resources.PidsLimit == 256 &&
 				hostConfig.Resources.Memory == 536870912 &&
 				hostConfig.Resources.NanoCPUs == 500000000 &&
 				hostConfig.Tmpfs["/workspace"] == "rw,nosuid,nodev,size=1g" &&

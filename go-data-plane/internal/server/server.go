@@ -27,6 +27,12 @@ func Run(cfg *config.Config) error {
 		HermesImage:   cfg.HermesImage,
 	})
 	pb.RegisterInstanceManagerServer(grpcSrv, instManager)
+	modelProxy := runtime.NewModelProxy()
+	modelProxy.BillingChecker = runtime.NewBillingCheckerImpl()
+	if cfg.OpenRouterKey != "" {
+		modelProxy.APIKey = cfg.OpenRouterKey
+	}
+	pb.RegisterModelProxyServer(grpcSrv, modelProxy)
 
 	// HTTP server (health + metrics)
 	r := gin.Default()

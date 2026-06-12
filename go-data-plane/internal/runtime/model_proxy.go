@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	pb "github.com/NoahStransky/agenthub/data-plane/pkg/protocol"
 	"google.golang.org/grpc/codes"
@@ -18,19 +19,25 @@ type ModelProxy struct {
 	BillingChecker BillingChecker
 	HTTPClient     *http.Client
 	UpstreamURL    string
+	APIKey         string
 }
 
 func NewModelProxy() *ModelProxy {
 	return &ModelProxy{
 		HTTPClient:  http.DefaultClient,
 		UpstreamURL: "https://openrouter.ai/api/v1/chat/completions",
+		APIKey:      os.Getenv("OPENROUTER_API_KEY"),
 	}
 }
 
 func (p *ModelProxy) ProxyModelRequest(ctx context.Context, req *pb.ModelRequest) (*pb.ModelResponse, error) {
 	requestedTokens := estimateTokens(req.Body)
+	billingChecker := p.BillingChecker
+	if billingChecker == nil {
+		billingChecker = noopBillingChecker{}
+	}
 
-	if err := p.BillingChecker.CheckQuota(req.TenantId, requestedTokens); err != nil {
+	if err := billingChecker.CheckQuota(req.TenantId, requestedTokens); err != nil {
 		return nil, status.Errorf(codes.ResourceExhausted, "quota exceeded: %v", err)
 	}
 
@@ -39,6 +46,10 @@ func (p *ModelProxy) ProxyModelRequest(ctx context.Context, req *pb.ModelRequest
 		return nil, fmt.Errorf("failed to create upstream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	if p.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
+	}
 	if req.ModelAlias != "" {
 		httpReq.Header.Set("X-Model-Alias", req.ModelAlias)
 	}
@@ -53,11 +64,17 @@ func (p *ModelProxy) ProxyModelRequest(ctx context.Context, req *pb.ModelRequest
 	if err != nil {
 		return nil, fmt.Errorf("failed to read upstream response: %w", err)
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, status.Errorf(codes.Unavailable, "upstream returned HTTP %d: %s", resp.StatusCode, truncateBody(respBody, 512))
+	}
 
 	usage := extractUsage(respBody)
+	if usage == nil {
+		usage = &pb.Usage{TotalTokens: uint32(requestedTokens)}
+	}
 
 	if usage != nil {
-		_ = p.BillingChecker.RecordUsage(req.TenantId, *usage)
+		_ = billingChecker.RecordUsage(req.TenantId, *usage)
 	}
 
 	return &pb.ModelResponse{
@@ -75,6 +92,16 @@ func estimateTokens(body []byte) int {
 		}
 	}
 	return len(body) / 4
+}
+
+type noopBillingChecker struct{}
+
+func (noopBillingChecker) CheckQuota(tenantID string, requestedTokens int) error {
+	return nil
+}
+
+func (noopBillingChecker) RecordUsage(tenantID string, usage pb.Usage) error {
+	return nil
 }
 
 func extractUsage(body []byte) *pb.Usage {
@@ -96,4 +123,11 @@ func extractUsage(body []byte) *pb.Usage {
 		CompletionTokens: result.Usage.CompletionTokens,
 		TotalTokens:      result.Usage.TotalTokens,
 	}
+}
+
+func truncateBody(body []byte, max int) string {
+	if len(body) <= max {
+		return string(body)
+	}
+	return string(body[:max]) + "..."
 }

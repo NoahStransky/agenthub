@@ -165,4 +165,60 @@ describe('LlmProviderService', () => {
     });
     expect(result.isDefault).toBe(true);
   });
+
+  it('should test a new provider connection without returning the API key', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch' as any).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({ data: [{ id: 'gpt-4.1-mini' }] }),
+    } as any);
+
+    const result = await service.testProviderConnection('tenant-1', {
+      name: 'OpenAI',
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-secret-123456',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/models', expect.objectContaining({
+      method: 'GET',
+      headers: expect.objectContaining({
+        Authorization: 'Bearer sk-secret-123456',
+      }),
+    }));
+    expect(result.ok).toBe(true);
+    expect(result.modelCount).toBe(1);
+    expect(result).not.toHaveProperty('apiKey');
+
+    fetchMock.mockRestore();
+  });
+
+  it('should test an existing tenant provider connection using the stored key', async () => {
+    mockPrisma.llmProviderConfig.findFirst.mockResolvedValue({
+      id: 'provider-1',
+      tenantId: 'tenant-1',
+      name: 'My OpenAI',
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyEnc: Buffer.from('sk-stored-123456', 'utf8').toString('base64'),
+      isDefault: true,
+      isActive: true,
+    });
+    const fetchMock = jest.spyOn(global, 'fetch' as any).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({ data: [] }),
+    } as any);
+
+    const result = await service.testExistingProviderConnection('tenant-1', 'provider-1');
+
+    expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/models', expect.objectContaining({
+      headers: expect.objectContaining({
+        Authorization: 'Bearer sk-stored-123456',
+      }),
+    }));
+    expect(result.ok).toBe(true);
+
+    fetchMock.mockRestore();
+  });
 });

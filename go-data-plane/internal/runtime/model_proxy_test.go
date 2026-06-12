@@ -18,9 +18,11 @@ import (
 type mockBillingChecker struct {
 	quotaExceeded bool
 	recordedUsage *pb.Usage
+	checkedTokens int
 }
 
 func (m *mockBillingChecker) CheckQuota(tenantID string, requestedTokens int) error {
+	m.checkedTokens = requestedTokens
 	if m.quotaExceeded {
 		return fmt.Errorf("quota exceeded")
 	}
@@ -35,9 +37,11 @@ func (m *mockBillingChecker) RecordUsage(tenantID string, usage pb.Usage) error 
 type mockTransport struct {
 	response *http.Response
 	err      error
+	request  *http.Request
 }
 
 func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	m.request = req
 	return m.response, m.err
 }
 
@@ -64,6 +68,7 @@ func TestProxyModelRequest(t *testing.T) {
 		BillingChecker: bc,
 		HTTPClient:     &http.Client{Transport: transport},
 		UpstreamURL:    "http://mock-upstream",
+		APIKey:         "sk-upstream",
 	}
 
 	req := &pb.ModelRequest{
@@ -82,6 +87,12 @@ func TestProxyModelRequest(t *testing.T) {
 	if resp.Upstream != "http://mock-upstream" {
 		t.Errorf("expected upstream http://mock-upstream, got %s", resp.Upstream)
 	}
+	if transport.request.Header.Get("Authorization") != "Bearer sk-upstream" {
+		t.Errorf("expected Authorization bearer token, got %q", transport.request.Header.Get("Authorization"))
+	}
+	if transport.request.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("expected JSON content type, got %q", transport.request.Header.Get("Content-Type"))
+	}
 
 	if resp.Usage == nil {
 		t.Fatal("expected usage, got nil")
@@ -95,6 +106,75 @@ func TestProxyModelRequest(t *testing.T) {
 	}
 	if bc.recordedUsage.TotalTokens != 30 {
 		t.Errorf("unexpected recorded usage total tokens: %d", bc.recordedUsage.TotalTokens)
+	}
+}
+
+func TestProxyModelRequestRecordsEstimatedUsageWhenUpstreamOmitsUsage(t *testing.T) {
+	upstreamBody := []byte(`{"id":"chatcmpl-no-usage","choices":[]}`)
+	transport := &mockTransport{
+		response: &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
+			Header:     make(http.Header),
+		},
+	}
+	bc := &mockBillingChecker{}
+	proxy := &ModelProxy{
+		BillingChecker: bc,
+		HTTPClient:     &http.Client{Transport: transport},
+		UpstreamURL:    "http://mock-upstream",
+	}
+
+	resp, err := proxy.ProxyModelRequest(context.Background(), &pb.ModelRequest{
+		TenantId: "tenant-1",
+		Body:     []byte(`{"messages":[{"role":"user","content":"hello"}],"max_tokens":64}`),
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Usage == nil {
+		t.Fatal("expected estimated usage")
+	}
+	if resp.Usage.TotalTokens != 64 {
+		t.Errorf("expected estimated total tokens 64, got %d", resp.Usage.TotalTokens)
+	}
+	if bc.recordedUsage == nil || bc.recordedUsage.TotalTokens != 64 {
+		t.Errorf("expected recorded estimated usage, got %+v", bc.recordedUsage)
+	}
+}
+
+func TestProxyModelRequestReturnsUnavailableForUpstreamErrors(t *testing.T) {
+	transport := &mockTransport{
+		response: &http.Response{
+			StatusCode: 429,
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`)),
+			Header:     make(http.Header),
+		},
+	}
+	proxy := &ModelProxy{
+		BillingChecker: &mockBillingChecker{},
+		HTTPClient:     &http.Client{Transport: transport},
+		UpstreamURL:    "http://mock-upstream",
+	}
+
+	_, err := proxy.ProxyModelRequest(context.Background(), &pb.ModelRequest{
+		TenantId: "tenant-1",
+		Body:     []byte(`{"messages":[{"role":"user","content":"hello"}]}`),
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got %T", err)
+	}
+	if st.Code() != codes.Unavailable {
+		t.Errorf("expected code Unavailable, got %v", st.Code())
+	}
+	if !strings.Contains(st.Message(), "429") {
+		t.Errorf("expected message to contain upstream status, got %s", st.Message())
 	}
 }
 

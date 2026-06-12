@@ -21,6 +21,18 @@ export class LlmProviderController {
     return this.llmProviderService.createTenantProvider(tenantId, dto);
   }
 
+  @Post('test')
+  test(@Body() dto: CreateLlmProviderDto, @Req() req: Request) {
+    const tenantId = (req as any).user?.tenantId;
+    return this.llmProviderService.testProviderConnection(tenantId, dto);
+  }
+
+  @Post(':id/test')
+  testExisting(@Param('id') id: string, @Req() req: Request) {
+    const tenantId = (req as any).user?.tenantId;
+    return this.llmProviderService.testExistingProviderConnection(tenantId, id);
+  }
+
   @Patch(':id/default')
   setDefault(@Param('id') id: string, @Req() req: Request) {
     const tenantId = (req as any).user?.tenantId;

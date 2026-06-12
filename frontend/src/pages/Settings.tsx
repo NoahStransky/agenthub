@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Form, Input, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Form, Input, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { apiFetch } from '../lib/api'
 
@@ -13,9 +13,22 @@ interface Provider {
   tenantId?: string | null
 }
 
+interface ProviderConnectionResult {
+  ok: boolean
+  status: number
+  latencyMs: number
+  provider: string
+  baseUrl: string
+  modelCount?: number
+  message?: string
+}
+
 export default function Settings() {
   const [providers, setProviders] = useState<Provider[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [testingProviderId, setTestingProviderId] = useState<string | null>(null)
+  const [testingDraft, setTestingDraft] = useState(false)
+  const [connectionResult, setConnectionResult] = useState<ProviderConnectionResult | null>(null)
   const [form] = Form.useForm()
 
   async function loadProviders() {
@@ -49,6 +62,46 @@ export default function Settings() {
     }
   }
 
+  async function testDraftProvider() {
+    try {
+      const values = await form.validateFields()
+      setTestingDraft(true)
+      const result = await apiFetch<ProviderConnectionResult>('/llm-providers/test', {
+        method: 'POST',
+        body: JSON.stringify(values),
+      })
+      setConnectionResult(result)
+      if (result.ok) {
+        message.success(`Connection ok (${result.latencyMs}ms)`)
+      } else {
+        message.error(result.message || `Provider returned HTTP ${result.status}`)
+      }
+    } catch (err) {
+      if (err instanceof Error) {
+        setError('Could not test provider connection')
+      }
+    } finally {
+      setTestingDraft(false)
+    }
+  }
+
+  async function testExistingProvider(item: Provider) {
+    try {
+      setTestingProviderId(item.id)
+      const result = await apiFetch<ProviderConnectionResult>(`/llm-providers/${item.id}/test`, { method: 'POST' })
+      setConnectionResult(result)
+      if (result.ok) {
+        message.success(`${item.name} connection ok (${result.latencyMs}ms)`)
+      } else {
+        message.error(result.message || `${item.name} returned HTTP ${result.status}`)
+      }
+    } catch {
+      setError('Could not test provider connection')
+    } finally {
+      setTestingProviderId(null)
+    }
+  }
+
   useEffect(() => {
     void loadProviders()
   }, [])
@@ -61,7 +114,16 @@ export default function Settings() {
     { title: 'Default', dataIndex: 'isDefault', render: (value) => value ? <Tag color="blue">Default</Tag> : <Tag>Available</Tag> },
     {
       title: 'Actions',
-      render: (_, item) => item.tenantId ? <Button size="small" onClick={() => setDefault(item.id)}>Set default</Button> : <Tag>Platform</Tag>,
+      render: (_, item) => (
+        <Space>
+          <Button size="small" loading={testingProviderId === item.id} onClick={() => testExistingProvider(item)}>Test</Button>
+          {item.tenantId ? (
+            <Button size="small" disabled={item.isDefault} onClick={() => setDefault(item.id)}>Set default</Button>
+          ) : (
+            <Tag>Platform</Tag>
+          )}
+        </Space>
+      ),
     },
   ]
 
@@ -72,6 +134,14 @@ export default function Settings() {
       <Card title="Model Providers">
         <Table rowKey="id" columns={columns} dataSource={providers} pagination={false} />
       </Card>
+      {connectionResult ? (
+        <Alert
+          type={connectionResult.ok ? 'success' : 'warning'}
+          showIcon
+          title={connectionResult.ok ? 'Provider connection succeeded' : 'Provider connection failed'}
+          description={`${connectionResult.provider} · HTTP ${connectionResult.status} · ${connectionResult.latencyMs}ms${connectionResult.modelCount !== undefined ? ` · ${connectionResult.modelCount} models` : ''}`}
+        />
+      ) : null}
       <Card title="Add Provider">
         <Form
           form={form}
@@ -91,7 +161,10 @@ export default function Settings() {
           <Form.Item name="apiKey" label="API Key" rules={[{ required: true }]}>
             <Input.Password />
           </Form.Item>
-          <Button type="primary" htmlType="submit">Save Provider</Button>
+          <Space>
+            <Button type="primary" htmlType="submit">Save Provider</Button>
+            <Button loading={testingDraft} onClick={testDraftProvider}>Test Connection</Button>
+          </Space>
         </Form>
       </Card>
     </Space>
